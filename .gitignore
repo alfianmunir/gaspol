@@ -1,0 +1,8 @@
+# Local environment values (never commit)
+config.js
+.env
+supabase/.env
+
+# Dependencies / tooling
+node_modules/
+.DS_Store
