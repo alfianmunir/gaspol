@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Gaspol — an AI personal trainer & meal coach that adapts your plan from what you actually do.">
+  <title>Gaspol — AI Personal Trainer</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <!-- Device shell: full-bleed on phones, centered "phone" on desktop -->
+  <div class="device">
+    <div class="screen">
+      <div class="statusbar" aria-hidden="true">
+        <span class="sb-time">9:41</span>
+        <span class="sb-right">
+          <span class="sb-signal"><i></i><i></i><i></i><i></i></span>
+          <span class="sb-net">5G</span>
+          <span class="sb-batt"><b></b></span>
+        </span>
+      </div>
+
+      <!-- Active screen renders here -->
+      <main id="view" class="view"></main>
+
+      <!-- Bottom tab bar -->
+      <nav id="tabbar" class="tabbar"></nav>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
