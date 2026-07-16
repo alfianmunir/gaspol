@@ -1,5 +1,5 @@
 /* Gaspol service worker — offline-first shell cache (PRD §8: works in a basement gym). */
-const CACHE = 'gaspol-v1';
+const CACHE = 'gaspol-v2';
 const ASSETS = [
   './',
   './index.html',
