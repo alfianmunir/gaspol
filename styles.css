@@ -53,21 +53,8 @@ a{color:var(--indigo-3);text-decoration:none}
   }
 }
 
-/* ---- Status bar ----------------------------------------- */
-.statusbar{
-  display:flex;justify-content:space-between;align-items:center;
-  padding:14px 30px 4px;font-size:15px;font-weight:600;flex:none;
-}
-.sb-right{display:flex;align-items:center;gap:7px}
-.sb-signal{display:flex;align-items:flex-end;gap:2px;height:11px}
-.sb-signal i{width:3px;background:var(--text);border-radius:1px}
-.sb-signal i:nth-child(1){height:5px}
-.sb-signal i:nth-child(2){height:7px}
-.sb-signal i:nth-child(3){height:9px}
-.sb-signal i:nth-child(4){height:11px}
-.sb-net{font-size:12px}
-.sb-batt{width:24px;height:12px;border:1.4px solid rgba(245,245,247,.9);border-radius:3px;padding:1.4px;display:block}
-.sb-batt b{display:block;width:75%;height:100%;background:var(--text);border-radius:1px}
+/* ---- Top safe-area spacer (replaces the fake status bar) -- */
+.safe-top{flex:none;height:max(env(safe-area-inset-top), 10px)}
 
 /* ---- View (scroll region) ------------------------------- */
 .view{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;position:relative;display:flex;flex-direction:column}

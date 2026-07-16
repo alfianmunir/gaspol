@@ -17,14 +17,8 @@
   <!-- Device shell: full-bleed on phones, centered "phone" on desktop -->
   <div class="device">
     <div class="screen">
-      <div class="statusbar" aria-hidden="true">
-        <span class="sb-time">9:41</span>
-        <span class="sb-right">
-          <span class="sb-signal"><i></i><i></i><i></i><i></i></span>
-          <span class="sb-net">5G</span>
-          <span class="sb-batt"><b></b></span>
-        </span>
-      </div>
+      <!-- top safe-area inset (real notch on device; small gap on desktop) -->
+      <div class="safe-top" aria-hidden="true"></div>
 
       <!-- Active screen renders here -->
       <main id="view" class="view"></main>
@@ -34,6 +28,9 @@
     </div>
   </div>
 
-  <script src="./app.js"></script>
+  <!-- To enable the Supabase backend: create config.js from config.example.js
+       and uncomment the next line (loads before the app sets window.GASPOL_CONFIG). -->
+  <!-- <script src="./config.js"></script> -->
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

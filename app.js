@@ -3,16 +3,22 @@
    Faithful implementation of Gaspol.dc.html (18 screens, F1–F10):
    dark, AI-first mobile coach. Vanilla JS state + render engine,
    installable offline PWA. Persona P1 "Munir" · Cut · Week 3.
+
+   Loaded as a module: it imports the progression engine directly and
+   lazy-loads the Supabase data layer only when window.GASPOL_CONFIG is
+   present, so the seed-data demo runs with no backend.
    ============================================================ */
+import { evaluateProgression } from './progression.js';
+
 (() => {
   'use strict';
 
   /* ---------- Reference data --------------------------------- */
   const ALTS = [
-    { name: 'Machine Chest Press', equip: 'Machine', cat: 'machine', match: 96, scheme: '4 × 8–10 @ 50 kg', best: true, note: 'Closest match to your bench strength curve.' },
-    { name: 'Dumbbell Bench Press', equip: 'Dumbbells', cat: 'dumbbell', match: 92, scheme: '4 × 8–10 @ 28 kg', note: 'More stabiliser work — log per dumbbell.' },
-    { name: 'Incline Machine Press', equip: 'Machine', cat: 'machine', match: 85, scheme: '4 × 8–10 @ 40 kg', note: 'Shifts load onto upper chest.' },
-    { name: 'Weighted Push-Up', equip: 'Bodyweight', cat: 'body', match: 78, scheme: '4 × 12–15 reps', note: 'No kit needed — add a plate on your back.' },
+    { name: 'Machine Chest Press', equip: 'Machine', cat: 'machine', match: 96, scheme: '4 × 8–10 @ 50 kg', weight: 50, best: true, note: 'Closest match to your bench strength curve.' },
+    { name: 'Dumbbell Bench Press', equip: 'Dumbbells', cat: 'dumbbell', match: 92, scheme: '4 × 8–10 @ 28 kg', weight: 28, note: 'More stabiliser work — log per dumbbell.' },
+    { name: 'Incline Machine Press', equip: 'Machine', cat: 'machine', match: 85, scheme: '4 × 8–10 @ 40 kg', weight: 40, note: 'Shifts load onto upper chest.' },
+    { name: 'Weighted Push-Up', equip: 'Bodyweight', cat: 'body', match: 78, scheme: '4 × 12–15 reps', weight: 0, note: 'No kit needed — add a plate on your back.' },
   ];
   const TAG_COLOR = { machine: '#8f8bff', dumbbell: '#ff9f0a', body: '#30d158' };
   const FILTERS = [['all', 'All'], ['machine', 'Machine'], ['dumbbell', 'Dumbbell'], ['body', 'Bodyweight']];
@@ -34,21 +40,35 @@
     { label: '1½ plate', mult: 1.5 },
   ];
 
+  /* ---------- Today's session (Push A) ----------------------- */
+  function mkEx(name, isCompound, sets, repLow, repHigh, weight, increment, prev, progressed) {
+    return {
+      id: null, name, isCompound, targetSets: sets, repLow, repHigh, weight, increment,
+      swappedFrom: null, progressed: !!progressed,
+      sets: Array.from({ length: sets }, (_, i) => ({ kg: weight, reps: repHigh, prev: prev[i] || '—', done: false })),
+    };
+  }
+  const SESSION_SEED = () => ({
+    name: 'Push A',
+    exercises: [
+      mkEx('Bench Press', true, 4, 6, 8, 64, 2.5, ['62×8', '62×8', '62×7', '62×7'], true),
+      mkEx('Overhead Press', true, 4, 6, 8, 40, 2.5, ['40×7', '40×7', '38×8', '38×8']),
+      mkEx('Incline DB Press', false, 3, 8, 10, 26, 2, ['24×10', '24×10', '24×9']),
+      mkEx('Lateral Raise', false, 3, 12, 15, 10, 1, ['10×12', '10×12', '10×11']),
+      mkEx('Triceps Pushdown', false, 3, 10, 12, 25, 1, ['22.5×12', '22.5×12', '22.5×11']),
+      mkEx('Cable Fly', false, 3, 12, 15, 14, 1, ['12×15', '12×15', '12×14']),
+    ],
+  });
+
   /* ---------- App state -------------------------------------- */
   const state = {
-    tab: 'today',        // today | workout | food | body | review  (+ full-screen routes below)
-    // full-screen routes: onboarding | report | checkin | settings | reminders | photos | foodphoto
+    tab: 'today',
     obStep: 0, obGoal: 'cut',
-    // workout
-    exName: 'Bench Press', exScheme: '4 × 6–8 @ 64 kg', progressed: true,
-    sets: [
-      { kg: 64, reps: 8, prev: '62×8', done: false },
-      { kg: 64, reps: 8, prev: '62×8', done: false },
-      { kg: 64, reps: 8, prev: '62×7', done: false },
-      { kg: 64, reps: 8, prev: '62×7', done: false },
-    ],
+    // workout — a full multi-exercise session
+    session: SESSION_SEED(), exIdx: 0,
     rest: 0, restTotal: 90,
-    swapOpen: false, filter: 'all', swapped: false, swappedFrom: null,
+    swapOpen: false, filter: 'all',
+    report: null,                 // set on finish: { realization, changes, volume, sets }
     // nutrition
     kcalTarget: 2150, proteinTarget: 155,
     meals: [
@@ -57,21 +77,24 @@
       { name: 'Snack · Greek yogurt', sub: '15:30 · 22 g protein', kcal: 360, protein: 22 },
     ],
     portionIdx: 2,
-    // body
     photoView: 'front', photoCompare: 50,
-    // check-in
     checkin: { sleep: 6.9, energy: 4, soreness: 4 },
-    // reminders (F9)
     reminders: {
       sessionStart: true, weighIn: true, weeklyReview: true,
       preworkout: true, caffeine: false, weeklyPhoto: true, streakRepair: false, whatsapp: false,
     },
   };
+  const curEx = () => state.session.exercises[state.exIdx];
+  const schemeOf = (ex) => `${ex.targetSets} × ${ex.repLow}–${ex.repHigh} @ ${fmtKg(ex.weight)} kg`;
+
+  /* ---------- Backend (optional) ----------------------------- */
+  const BE = { on: false, api: null };
 
   /* ---------- Helpers ---------------------------------------- */
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const fmtKg = (v) => (Number.isInteger(Number(v)) ? String(v) : Number(v).toFixed(1));
   const sum = (arr, k) => arr.reduce((a, x) => a + x[k], 0);
   const nowTime = () => new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -86,12 +109,11 @@
   };
   const TAB_SCREENS = ['today', 'food', 'body', 'review'];
   const TABS = [['today', 'Today'], ['workout', 'Workout'], ['food', 'Food'], ['body', 'Body'], ['review', 'Progress']];
-
-  const AB = '<div class="ai-badge">AI</div>';           // small AI badge
+  const AB = '<div class="ai-badge">AI</div>';
   const HINT = (html) => `<div class="hint"><span class="b"></span><span>${html}</span></div>`;
 
   /* =========================================================
-     SCREENS — Today (1a)
+     Today (1a)
      ========================================================= */
   function screenToday() {
     const kcal = sum(state.meals, 'kcal'), protein = sum(state.meals, 'protein');
@@ -105,25 +127,22 @@
           <button class="gear" data-action="nav:settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS.gear}</svg></button>
         </div>
       </div>
-
       <div class="coach" style="margin-bottom:16px">
         <div class="coach-head">${AB}<span class="coach-title">Coach</span><span class="dot-live"></span>
           <span style="font-size:11px;color:rgba(255,255,255,.5);margin-left:auto">Updated just now</span></div>
         <p>Bench cleared its top set two weeks running — I moved <b>Thursday to 64&nbsp;kg</b>. You're <b>1.2&nbsp;kg down</b> this week, right on trend. Hit your protein floor today: <b>155&nbsp;g</b>.</p>
         <div class="coach-link" data-action="nav:review">See the 3 changes →</div>
       </div>
-
       <div class="card" style="margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
           <span class="section-label" style="margin:0">TODAY'S SESSION</span>
           <span style="font-size:11px;color:var(--muted-2)">Program · Week 3 of 4</span></div>
-        <div style="font-size:24px;font-weight:700;letter-spacing:-.4px">Push A</div>
-        <div style="font-size:13px;color:var(--muted);margin:3px 0 14px">6 exercises · ~52 min · Chest · Shoulders · Triceps</div>
+        <div style="font-size:24px;font-weight:700;letter-spacing:-.4px">${esc(state.session.name)}</div>
+        <div style="font-size:13px;color:var(--muted);margin:3px 0 14px">${state.session.exercises.length} exercises · ~52 min · Chest · Shoulders · Triceps</div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">
           <span class="chip">Bench · 64 kg</span><span class="chip">OHP</span><span class="chip">Incline DB</span><span class="chip">+3 more</span></div>
         <button class="btn btn-primary" data-action="nav:workout">Start workout</button>
       </div>
-
       <div class="stat-row">
         <div class="ring-card"><h4>Calories</h4><div class="ring-wrap">
           <div class="ring" style="background:conic-gradient(var(--green) ${kcalDeg}deg,rgba(255,255,255,.08) ${kcalDeg}deg)"><span>${kcalPct}%</span></div>
@@ -132,7 +151,6 @@
           <div class="ring" style="background:conic-gradient(var(--orange) ${proteinDeg}deg,rgba(255,255,255,.08) ${proteinDeg}deg)"><span>${proteinPct}%</span></div>
           <div><div class="ring-val">${protein}<span style="font-size:12px;color:var(--muted-2)">g</span></div><div class="ring-sub">of ${state.proteinTarget} g</div></div></div></div>
       </div>
-
       <div class="quick-row">
         <div class="quick" data-action="nav:body">Log weight</div>
         <div class="quick" data-action="nav:food">Log meal</div>
@@ -142,38 +160,44 @@
   }
 
   /* =========================================================
-     Workout (1c) + swap (2a)
+     Workout (1c) + swap (2a) — F2
      ========================================================= */
   function screenWorkout() {
-    const activeIdx = state.sets.findIndex((s) => !s.done);
-    const rows = state.sets.map((s, i) => {
+    const ex = curEx();
+    const n = state.session.exercises.length;
+    const activeIdx = ex.sets.findIndex((s) => !s.done);
+    const rows = ex.sets.map((s, i) => {
       const cls = s.done ? 'done' : (i === activeIdx ? 'active' : '');
       const numColor = s.done ? 'var(--green)' : (i === activeIdx ? 'var(--text)' : 'var(--dim)');
       const repsColor = s.done ? 'var(--text)' : 'var(--dim)';
       return `<div class="set-grid set-row ${cls}">
         <span class="set-n" style="color:${numColor}">${i + 1}</span>
-        <span class="set-prev">${esc(s.prev)}</span><span class="set-kg">${s.kg}</span>
+        <span class="set-prev">${esc(s.prev)}</span><span class="set-kg">${fmtKg(s.kg)}</span>
         <span class="set-reps" style="color:${repsColor}">${s.done ? s.reps : '·'}</span>
         <div class="set-check-wrap"><button class="set-check" data-action="log-set:${i}" aria-label="Log set ${i + 1}">✓</button></div>
       </div>`;
     }).join('');
-    const swapNote = state.swapped ? `<div class="swap-note"><span class="tick">✓</span>Swapped from ${esc(state.swappedFrom)} · weight re-estimated by Coach</div>` : '';
-    const done = state.sets.filter((s) => s.done).length;
+    const swapNote = ex.swappedFrom ? `<div class="swap-note"><span class="tick">✓</span>Swapped from ${esc(ex.swappedFrom)} · weight re-estimated by Coach</div>` : '';
+    const done = ex.sets.filter((s) => s.done).length;
+    const dots = state.session.exercises.map((e, idx) => {
+      const cls = e.sets.every((s) => s.done) ? 'done' : (idx === state.exIdx ? 'cur' : '');
+      return `<i class="${cls}"></i>`;
+    }).join('');
     return `<div class="workout">
       <div class="sess-top">
         <button class="icon-btn" data-action="nav:today" aria-label="End workout">✕</button>
-        <div class="sess-mid"><div class="sess-kicker">PUSH A · 2 / 6</div><div class="sess-name">${esc(state.exName)}</div></div>
+        <div class="sess-mid"><div class="sess-kicker">${esc(state.session.name.toUpperCase())} · ${state.exIdx + 1} / ${n}</div><div class="sess-name">${esc(ex.name)}</div></div>
         <div class="sess-elapsed" style="text-align:right"><div class="l">ELAPSED</div><div class="v">24:18</div></div>
       </div>
-      <div class="progress-dots"><i class="done"></i><i class="cur"></i><i></i><i></i><i></i><i></i></div>
+      <div class="progress-dots">${dots}</div>
       <div class="workout-scroll"><div class="pad" style="padding-top:0">
         <div class="ex-head"><div class="ex-head-row">
-          <div style="flex:1"><div class="ex-name">${esc(state.exName)}</div><div class="ex-scheme">Prescribed&nbsp;<b>${esc(state.exScheme)}</b></div></div>
+          <div style="flex:1"><div class="ex-name">${esc(ex.name)}</div><div class="ex-scheme">Prescribed&nbsp;<b>${esc(schemeOf(ex))}</b></div></div>
           <button class="swap-btn" data-action="open-swap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="17,3 21,7 17,11"/><line x1="21" y1="7" x2="7" y2="7"/><polyline points="7,21 3,17 7,13"/><line x1="3" y1="17" x2="17" y2="17"/></svg>Swap</button>
         </div>${swapNote}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-          <span style="font-size:13px;color:var(--muted)">${done}/4 sets logged</span>
-          ${state.progressed ? '<span class="progressed">↑ Progressed</span>' : ''}</div>
+          <span style="font-size:13px;color:var(--muted)">${done}/${ex.targetSets} sets logged</span>
+          ${ex.progressed && !ex.swappedFrom ? '<span class="progressed">↑ Progressed</span>' : ''}</div>
         <div class="set-table">
           <div class="set-grid head"><span>SET</span><span>PREV</span><span class="c">KG</span><span class="c">REPS</span><span></span></div>
           ${rows}
@@ -186,9 +210,11 @@
   }
 
   function restRegion() {
-    if (state.sets.every((s) => s.done)) {
+    const ex = curEx();
+    const last = state.exIdx === state.session.exercises.length - 1;
+    if (ex.sets.every((s) => s.done)) {
       return `<div class="rest" style="background:#0d0d10">
-        <button class="btn btn-primary" data-action="nav:report">Finish session →</button></div>`;
+        <button class="btn btn-primary" data-action="${last ? 'finish-session' : 'next-exercise'}">${last ? 'Finish session →' : 'Next exercise →'}</button></div>`;
     }
     if (state.rest > 0) {
       const pct = Math.round(state.rest / state.restTotal * 100);
@@ -223,36 +249,43 @@
   }
 
   /* =========================================================
-     Session report (4a)
+     Session report (4a) — computed from the logged session + F3
      ========================================================= */
   function screenReport() {
-    const rowsHtml = [
-      ['Bench Press', '4×6–8 @ 64 → <b style="color:var(--text-2)">4×8 @ 64</b>', 'Exceeded ↑', 'var(--green)', 'rgba(48,209,88,.14)'],
-      ['Overhead Press', '4×6–8 @ 40 → <b style="color:var(--text-2)">4×7 @ 40</b>', 'Hit ✓', 'var(--indigo-3)', 'rgba(94,92,230,.16)'],
-      ['Lateral Raise', '3×12–15 @ 10 → <b style="color:var(--text-2)">3×10 @ 10</b>', 'Under ↓', 'var(--orange)', 'rgba(255,159,10,.14)'],
-    ].map(([n, d, tag, c, bg]) => `<div class="srow"><div><div class="n">${n}</div><div class="sub">${d}</div></div>
-      <span style="font-size:11px;font-weight:700;color:${c};background:${bg};padding:5px 9px;border-radius:999px">${tag}</span></div>`).join('');
+    const r = state.report || { realization: [], changes: [], volume: 0, sets: 0 };
+    const rowsHtml = r.realization.map((x) => `<div class="srow"><div><div class="n">${esc(x.name)}</div>
+      <div class="sub">${esc(x.prescribed)} → <b style="color:var(--text-2)">${esc(x.performed)}</b></div></div>
+      <span style="font-size:11px;font-weight:700;color:${x.color};background:${x.bg};padding:5px 9px;border-radius:999px">${x.tag}</span></div>`).join('');
+
+    const changesHtml = r.changes.length
+      ? `<div class="section-label">COACH ADJUSTMENTS · next session</div>
+         <div class="group">${r.changes.map((c) => `<div class="srow"><div><div class="n">${esc(c.name)} → ${fmtKg(c.to)} kg <span style="color:${c.delta >= 0 ? 'var(--green)' : 'var(--orange)'};font-weight:600">(${c.delta >= 0 ? '+' : ''}${fmtKg(c.delta)})</span></div><div class="sub">${esc(c.reason)}</div></div></div>`).join('')}</div>
+         <button class="btn btn-ghost" data-action="undo-progression" style="margin-bottom:16px">${r.undone ? 'Adjustments reverted' : 'Undo adjustments'}</button>`
+      : '';
+
+    const exceeded = r.realization.filter((x) => x.tag.startsWith('Exceeded')).length;
     return `<div class="route">
       <div class="topbar"><span style="width:34px"></span><span class="grow" style="text-align:center;font-size:16px;font-weight:700">Session complete</span>
         <button class="sheet-cancel" data-action="finish-report" style="width:auto">Done</button></div>
-      <div class="view" style="overflow:visible"><div class="pad" style="padding-top:8px">
+      <div class="view" style="overflow-y:auto"><div class="pad" style="padding-top:8px">
         <div style="text-align:center;padding:14px 0 18px">
           <div style="width:64px;height:64px;border-radius:50%;background:rgba(48,209,88,.15);border:1.5px solid rgba(48,209,88,.4);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:28px;color:var(--green);font-weight:800">✓</div>
-          <div style="font-size:24px;font-weight:700;letter-spacing:-.4px">Push A · done</div>
-          <div style="font-size:13px;color:var(--muted-2);margin-top:3px">51 min · 18 sets · 4,860 kg total volume</div></div>
+          <div style="font-size:24px;font-weight:700;letter-spacing:-.4px">${esc(state.session.name)} · done</div>
+          <div style="font-size:13px;color:var(--muted-2);margin-top:3px">${r.sets} sets · ${r.volume.toLocaleString()} kg total volume</div></div>
         <div style="display:flex;gap:10px;margin-bottom:18px">
           <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:13px;text-align:center"><div style="font-size:20px;font-weight:800;color:var(--green)">+8%</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">volume vs last</div></div>
-          <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:13px;text-align:center"><div style="font-size:20px;font-weight:800">2 ↑</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">exceeded target</div></div>
+          <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:13px;text-align:center"><div style="font-size:20px;font-weight:800">${exceeded} ↑</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">exceeded target</div></div>
           <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:13px;text-align:center"><div style="font-size:20px;font-weight:800;color:var(--orange)">12</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">day streak</div></div></div>
         <div class="section-label">PRESCRIBED vs PERFORMED</div>
-        <div class="group">${rowsHtml}</div>
+        <div class="group">${rowsHtml || '<div class="srow"><div class="sub">No sets logged.</div></div>'}</div>
+        ${changesHtml}
         <div class="coach"><div class="coach-head">${AB}<span class="coach-title">Coach note</span></div>
-          <p>Bench exceeded target <b>two weeks running</b> — I'll move it to 66 kg Thursday. Lateral raises fell short; try dropping to 8 kg and owning the top of the range.</p></div>
+          <p>${esc(r.note || 'Solid session logged. Keep the top sets honest and progression takes care of itself.')}</p></div>
       </div></div></div>`;
   }
 
   /* =========================================================
-     Food day log (3b)
+     Food day log (3b) + AI photo (3a) — F5
      ========================================================= */
   function screenFood() {
     const kcal = sum(state.meals, 'kcal'), protein = sum(state.meals, 'protein');
@@ -282,7 +315,6 @@
     </div>`;
   }
 
-  /* Food · AI photo estimate (3a) */
   function screenFoodphoto() {
     const p = PORTIONS[state.portionIdx];
     const kcal = Math.round(620 * p.mult / 10) * 10;
@@ -316,7 +348,7 @@
   }
 
   /* =========================================================
-     Body (4b) + progress-photo compare (4c)
+     Body (4b) + progress-photo compare (4c) — F6
      ========================================================= */
   function screenBody() {
     return `<div class="route">
@@ -367,7 +399,7 @@
   }
 
   /* =========================================================
-     Daily check-in (4d)
+     Daily check-in (4d) — F7
      ========================================================= */
   function rating(kind, val, activeBg, activeInk) {
     return `<div class="rate">${[1, 2, 3, 4, 5].map((n) => {
@@ -394,11 +426,9 @@
   }
 
   /* =========================================================
-     Reminders (5a) + Settings (5b)
+     Reminders (5a) + Settings (5b) — F9/F10
      ========================================================= */
-  function tgl(on, action) {
-    return `<button class="tgl ${on ? 'on' : 'off'}" data-action="${action}" aria-pressed="${on}"><i></i></button>`;
-  }
+  function tgl(on, action) { return `<button class="tgl ${on ? 'on' : 'off'}" data-action="${action}" aria-pressed="${on}"><i></i></button>`; }
   function remRow(key, name, sub, last) {
     return `<div class="srow"${last ? ' style="border-bottom:none"' : ''}><div><div class="n">${name}</div><div class="sub">${sub}</div></div>${tgl(state.reminders[key], 'toggle:' + key)}</div>`;
   }
@@ -451,12 +481,12 @@
         </div>
         <button class="btn btn-ghost" data-action="replay-onboarding" style="margin-bottom:10px">Replay onboarding</button>
         <button class="btn btn-ghost" data-action="toast:Signed out">Sign out</button>
-        <button style="width:100%;background:transparent;color:var(--red,#ff453a);border:none;font-size:14px;font-weight:600;padding:12px;cursor:pointer;margin-top:6px" data-action="toast:Account deletion — full export first">Delete account</button>
+        <button style="width:100%;background:transparent;color:#ff453a;border:none;font-size:14px;font-weight:600;padding:12px;cursor:pointer;margin-top:6px" data-action="toast:Account deletion — full export first">Delete account</button>
       </div></div>`;
   }
 
   /* =========================================================
-     Onboarding (3c intake → 3d plan preview)
+     Onboarding (3c → 3d) — F1
      ========================================================= */
   function screenOnboarding() {
     if (state.obStep === 0) {
@@ -480,7 +510,6 @@
           <button class="btn btn-primary" data-action="ob-next" style="padding:17px">Continue</button>
         </div></div>`;
     }
-    // step 1 — generated plan preview (3d)
     const goalName = GOALS.find((g) => g[0] === state.obGoal)[1];
     const week = [['Mon', 'Push A', '~52 min'], ['Tue', 'Pull A', '~50 min'], ['Wed', 'Legs A', '~55 min'], ['Thu', 'Rest / mobility', '']]
       .map(([d, s, t], i, arr) => `<div class="srow"${i === arr.length - 1 ? ' style="border-bottom:none"' : ''}><span style="font-size:14px;font-weight:600;color:var(--muted-2);width:44px">${d}</span><span style="font-size:14px;font-weight:600;flex:1;${!t ? 'color:var(--muted)' : ''}">${s}</span>${t ? `<span style="font-size:12px;color:var(--muted-2)">${t}</span>` : ''}</div>`).join('');
@@ -505,11 +534,12 @@
   }
 
   /* =========================================================
-     Weekly review (1e)
+     Weekly review (1e) — F8
      ========================================================= */
   function screenReview() {
-    const swapChange = state.swapped ? `<div class="change"><div class="dot" style="background:#8f8bff"></div>
-      <div><div class="t">Bench Press → ${esc(state.exName)}</div><div class="d">Swapped mid-session — Coach re-estimated the load so progression still counts.</div></div></div>` : '';
+    const sw = state.session.exercises.find((e) => e.swappedFrom);
+    const swapChange = sw ? `<div class="change"><div class="dot" style="background:#8f8bff"></div>
+      <div><div class="t">${esc(sw.swappedFrom)} → ${esc(sw.name)}</div><div class="d">Swapped mid-session — Coach re-estimated the load so progression still counts.</div></div></div>` : '';
     return `<div>
       <div class="review-head"><button class="icon-btn" data-action="nav:today" style="font-size:18px">‹</button>
         <div><div class="sess-kicker">WEEKLY REVIEW</div><div class="sess-name">13–19 Jul · Week 3</div></div></div>
@@ -554,11 +584,9 @@
     const bar = $('#tabbar');
     if (!TAB_SCREENS.includes(state.tab)) { bar.style.display = 'none'; return; }
     bar.style.display = '';
-    bar.innerHTML = TABS.map(([key, label]) => {
-      const active = state.tab === key || (key === 'workout' && false);
-      return `<button class="tab ${active ? 'active' : ''}" data-action="nav:${key}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS[key]}</svg><span>${label}</span></button>`;
-    }).join('');
+    bar.innerHTML = TABS.map(([key, label]) =>
+      `<button class="tab ${state.tab === key ? 'active' : ''}" data-action="nav:${key}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS[key]}</svg><span>${label}</span></button>`).join('');
   }
   function render() {
     $('#view').innerHTML = currentScreen();
@@ -567,7 +595,6 @@
   }
   function paintRest() { const r = $('#restRegion'); if (r) r.innerHTML = restRegion(); }
 
-  /* ---- Progress-photo compare (drag) ------------------------ */
   function wireCompare() {
     const input = $('#cmp'); if (!input) return;
     input.addEventListener('input', () => {
@@ -594,54 +621,138 @@
      ACTIONS
      ========================================================= */
   function logSet(i) {
-    const s = state.sets[i];
+    const ex = curEx();
+    const s = ex.sets[i];
     if (!s || s.done) return;
-    s.done = true; s.reps = s.reps || 8; state.rest = 90; state.restTotal = 90;
+    s.done = true; s.reps = s.reps || ex.repHigh; state.rest = 90; state.restTotal = 90;
+    // Persist through the data layer when the backend is wired (offline-queued).
+    if (BE.on && ex.id != null) {
+      BE.api.logSet({ exerciseId: ex.id, setNumber: i + 1, weight: s.kg, reps: s.reps }).catch(() => {});
+    }
     render();
-    if (state.sets.every((x) => x.done)) showToast('All sets logged — finish when ready');
+    if (ex.sets.every((x) => x.done)) {
+      const last = state.exIdx === state.session.exercises.length - 1;
+      showToast(last ? 'Last exercise done — finish when ready' : 'Exercise done — next up');
+    }
+  }
+  function nextExercise() {
+    if (state.exIdx < state.session.exercises.length - 1) { state.exIdx += 1; state.rest = 0; render(); $('#view').scrollTop = 0; }
   }
   function chooseAlt(idx) {
     const a = ALTS[idx]; if (!a) return;
-    state.swappedFrom = state.exName; state.exName = a.name; state.exScheme = a.scheme;
-    state.swapped = true; state.swapOpen = false; state.filter = 'all';
+    const ex = curEx();
+    ex.swappedFrom = ex.name; ex.name = a.name; ex.weight = a.weight || ex.weight;
+    ex.sets.forEach((s) => { s.kg = ex.weight; });
+    state.swapOpen = false; state.filter = 'all';
     render(); showToast(`Swapped to ${a.name} · weight re-estimated`);
   }
+
+  /** Finish the session: compute realization + F3 progression, then report. */
+  function finishSession() {
+    const realization = [];
+    const changes = [];
+    let volume = 0, setsDone = 0;
+    for (const ex of state.session.exercises) {
+      const logged = ex.sets.filter((s) => s.done);
+      setsDone += logged.length;
+      volume += logged.reduce((a, s) => a + s.kg * s.reps, 0);
+      if (logged.length) {
+        const minReps = Math.min(...logged.map((s) => s.reps));
+        const rz = minReps >= ex.repHigh
+          ? { tag: 'Exceeded ↑', color: 'var(--green)', bg: 'rgba(48,209,88,.14)' }
+          : minReps >= ex.repLow
+            ? { tag: 'Hit ✓', color: 'var(--indigo-3)', bg: 'rgba(94,92,230,.16)' }
+            : { tag: 'Under ↓', color: 'var(--orange)', bg: 'rgba(255,159,10,.14)' };
+        realization.push({
+          name: ex.name, prescribed: schemeOf(ex),
+          performed: `${logged.length}×${minReps} @ ${fmtKg(ex.weight)}`, ...rz,
+        });
+        // F3 progression from progression.js
+        const res = evaluateProgression(
+          { current_weight: ex.weight, increment: ex.increment, is_compound: ex.isCompound, rep_low: ex.repLow, rep_high: ex.repHigh },
+          [{ sets: logged.map((s) => ({ weight: s.kg, reps: s.reps })) }],
+        );
+        if (res.action !== 'hold' && res.newWeight !== ex.weight) {
+          ex.prevWeight = ex.weight;
+          ex.pendingWeight = res.newWeight;   // applied for "next session"
+          changes.push({ ex, name: ex.name, from: ex.weight, to: res.newWeight, delta: res.newWeight - ex.weight, reason: res.reason });
+          if (BE.on && ex.id != null) {
+            BE.api.applyProgression(
+              { id: ex.id, current_weight: ex.weight, increment: ex.increment, is_compound: ex.isCompound, rep_low: ex.repLow, rep_high: ex.repHigh },
+              [{ sets: logged.map((s) => ({ weight: s.kg, reps: s.reps })) }],
+            ).catch(() => {});
+          }
+        }
+      }
+    }
+    const note = changes.length
+      ? `${changes.length} lift${changes.length > 1 ? 's' : ''} progressed — I've set next session's weights. Everything else holds; keep the top sets honest.`
+      : 'Clean session logged. Hold these weights and chase the top of each rep range next time.';
+    state.report = { realization, changes, volume: Math.round(volume), sets: setsDone, note, undone: false };
+    state.tab = 'report'; render(); $('#view').scrollTop = 0;
+  }
+
+  function undoProgression() {
+    if (!state.report || state.report.undone) return;
+    for (const c of state.report.changes) {
+      c.ex.pendingWeight = c.ex.prevWeight;    // revert display
+      if (BE.on && c.ex.id != null) {
+        BE.api.applyProgression(  // write the old weight back (force via a hold-style set)
+          { id: c.ex.id, current_weight: c.to, increment: c.from - c.to, is_compound: c.ex.isCompound, rep_low: c.ex.repLow, rep_high: c.ex.repHigh },
+          [{ sets: [{ weight: c.to, reps: c.ex.repHigh }] }],
+        ).catch(() => {});
+      }
+    }
+    state.report.undone = true;
+    render(); showToast('Progression reverted — weights held');
+  }
+
+  async function finishReport() {
+    // Reset for a fresh session; re-hydrate from backend when wired.
+    state.report = null; state.exIdx = 0;
+    if (BE.on) { await hydrateSession(); } else { state.session = SESSION_SEED(); }
+    state.rest = 0; state.tab = 'today'; render(); showToast('Session saved · streak 12 days');
+  }
+
   function addPreset(k) {
     const p = PRESETS[k]; if (!p) return;
     state.meals.push({ name: p.name, sub: `${nowTime()} · ${p.protein} g protein`, kcal: p.kcal, protein: p.protein });
+    if (BE.on) BE.api.logFood({ meal: k, name: p.name, kcal: p.kcal, protein: p.protein }).catch(() => {});
     render(); showToast(`Added · ${k} (${p.kcal} kcal)`);
   }
   function logPhoto() {
     const p = PORTIONS[state.portionIdx];
     const kcal = Math.round(620 * p.mult / 10) * 10, protein = Math.round(34 * p.mult);
-    state.meals.push({ name: 'Nasi + ayam goreng + tempe', sub: `${nowTime()} · ${protein} g protein`, kcal, protein, ai: true });
+    const meal = { name: 'Nasi + ayam goreng + tempe', sub: `${nowTime()} · ${protein} g protein`, kcal, protein, ai: true };
+    state.meals.push(meal);
+    if (BE.on) BE.api.logFood({ meal: 'AI photo', name: meal.name, kcal, protein }).catch(() => {});
     state.tab = 'food'; state.portionIdx = 2; render(); showToast(`Logged · ${kcal} kcal (AI estimate)`);
   }
 
   const ACTIONS = {
     'nav': (a) => { state.tab = a; render(); $('#view').scrollTop = 0; },
     'log-set': (a) => logSet(Number(a)),
+    'next-exercise': () => nextExercise(),
+    'finish-session': () => finishSession(),
     'skip-rest': () => { state.rest = 0; paintRest(); },
     'open-swap': () => { state.swapOpen = true; render(); },
     'close-swap': () => { state.swapOpen = false; render(); },
     'filter': (a) => { state.filter = a; render(); },
     'choose-alt': (a) => chooseAlt(Number(a)),
-    'finish-report': () => {
-      // reset the session so the loop can replay
-      state.sets.forEach((s) => { s.done = false; }); state.rest = 0;
-      state.swapped = false; state.swappedFrom = null; state.exName = 'Bench Press'; state.exScheme = '4 × 6–8 @ 64 kg';
-      state.tab = 'today'; render(); showToast('Session saved · streak 12 days');
-    },
+    'undo-progression': () => undoProgression(),
+    'finish-report': () => { finishReport(); },
     'add-preset': (a) => addPreset(a),
     'log-photo': () => logPhoto(),
     'portion': (a) => { const d = Number(a); state.portionIdx = d === 0 ? 2 : Math.max(0, Math.min(PORTIONS.length - 1, state.portionIdx + d)); render(); },
     'photoview': (a) => { state.photoView = a; render(); },
     'rate': (a) => { const [kind, n] = a.split(':'); state.checkin[kind] = Number(n); render(); },
-    'save-checkin': () => { state.tab = 'today'; render(); showToast('Check-in saved · thanks, Munir'); },
-    'toggle': (a) => { state.reminders[a] = !state.reminders[a]; render(); },
-    'log-weight': () => showToast('Weigh-in saved · 74.2 kg'),
+    'save-checkin': () => {
+      if (BE.on) BE.api.saveCheckin({ sleepHours: state.checkin.sleep, energy: state.checkin.energy, soreness: state.checkin.soreness }).catch(() => {});
+      state.tab = 'today'; render(); showToast('Check-in saved · thanks, Munir');
+    },
+    'toggle': (a) => { state.reminders[a] = !state.reminders[a]; if (BE.on) BE.api.setReminder(a, state.reminders[a]).catch(() => {}); render(); },
+    'log-weight': () => { if (BE.on) BE.api.logWeighIn({ weightKg: 74.2 }).catch(() => {}); showToast('Weigh-in saved · 74.2 kg'); },
     'toast': (a) => showToast(a),
-    // onboarding
     'ob-goal': (a) => { state.obGoal = a; render(); },
     'ob-next': () => { state.obStep = 1; render(); $('#view').scrollTop = 0; },
     'ob-back': () => { state.obStep = 0; render(); },
@@ -663,17 +774,46 @@
 
   /* ---- 1s clock: rest timer -------------------------------- */
   setInterval(() => {
-    if (state.rest > 0 && !state.sets.every((s) => s.done)) {
+    if (state.rest > 0 && !curEx().sets.every((s) => s.done)) {
       state.rest -= 1;
       if (state.tab === 'workout') paintRest();
     }
   }, 1000);
 
-  /* ---- Boot ------------------------------------------------- */
-  try { if (!localStorage.getItem('gaspol_onboarded')) state.tab = 'onboarding'; } catch (e) { /* ignore */ }
-  render();
-
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  /* =========================================================
+     BOOT (+ optional backend hydrate)
+     ========================================================= */
+  function mapSession(today) {
+    return {
+      name: today.session || 'Today',
+      exercises: today.exercises.map((e) => ({
+        id: e.id, name: e.name, isCompound: e.isCompound,
+        targetSets: e.prescribed.sets, repLow: e.prescribed.repLow, repHigh: e.prescribed.repHigh,
+        weight: e.prescribed.weight, increment: e.isCompound ? 2.5 : 1,
+        swappedFrom: null, progressed: false,
+        sets: e.sets.map((s) => ({ kg: s.kg, reps: s.reps, prev: s.prev || '—', done: false })),
+      })),
+    };
   }
+  async function hydrateSession() {
+    const today = await BE.api.getTodaySession();
+    if (today && today.exercises && today.exercises.length) { state.session = mapSession(today); state.exIdx = 0; }
+    else state.session = SESSION_SEED();
+  }
+  async function boot() {
+    try { if (!localStorage.getItem('gaspol_onboarded')) state.tab = 'onboarding'; } catch (e) { /* ignore */ }
+    if (typeof window !== 'undefined' && window.GASPOL_CONFIG) {
+      try {
+        const mod = await import('./data.js');
+        await mod.GaspolData.init();
+        BE.api = mod.GaspolData; BE.on = true;
+        await hydrateSession();
+      } catch (e) { console.warn('[Gaspol] backend unavailable — running on seed data.', e); BE.on = false; }
+    }
+    render();
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    }
+  }
+  boot();
 })();
