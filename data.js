@@ -167,6 +167,11 @@ export const GaspolData = {
   },
 
   /* ---------- Daily check-in (F7) ------------------------- */
+  async getCheckin(logDate = today()) {
+    const { data, error } = await read('fit_checkins').eq('log_date', logDate).maybeSingle();
+    if (error) throw error;
+    return data;
+  },
   async saveCheckin({ sleepHours, sleepQuality = null, energy, soreness, notes = null, logDate = today() }) {
     const { data, error } = await table('fit_checkins')
       .upsert({ log_date: logDate, sleep_hours: sleepHours, sleep_quality: sleepQuality, energy, soreness, notes, user_id: uid },

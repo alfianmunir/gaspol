@@ -39,6 +39,12 @@ import { evaluateProgression } from './progression.js';
     { label: '1 plate · warteg', mult: 1 }, { label: 'large plate', mult: 1.25 },
     { label: '1½ plate', mult: 1.5 },
   ];
+  // 35-day weight trend seed (demo). Replaced by fit_body_metrics when the backend is on.
+  const BODY_TREND = (() => {
+    const a = []; let w = 75.6;
+    for (let i = 0; i < 35; i++) { w -= 0.04 + (i % 5 === 0 ? 0.02 : 0); a.push(Math.round(w * 10) / 10); }
+    a[a.length - 1] = 74.2; return a;
+  })();
 
   /* ---------- Today's session (Push A) ----------------------- */
   function mkEx(name, isCompound, sets, repLow, repHigh, weight, increment, prev, progressed) {
@@ -78,6 +84,7 @@ import { evaluateProgression } from './progression.js';
     ],
     portionIdx: 2,
     photoView: 'front', photoCompare: 50,
+    body: { weightKg: 74.2, weekChange: -1.2, waist: 82, hip: 96, bf: 16, trend: BODY_TREND.slice() },
     checkin: { sleep: 6.9, energy: 4, soreness: 4 },
     reminders: {
       sessionStart: true, weighIn: true, weeklyReview: true,
@@ -111,6 +118,25 @@ import { evaluateProgression } from './progression.js';
   const TABS = [['today', 'Today'], ['workout', 'Workout'], ['food', 'Food'], ['body', 'Body'], ['review', 'Progress']];
   const AB = '<div class="ai-badge">AI</div>';
   const HINT = (html) => `<div class="hint"><span class="b"></span><span>${html}</span></div>`;
+
+  /** Weight-trend area chart from an array of kg values. */
+  function trendSvg(trend) {
+    const n = trend.length; if (n < 2) return '';
+    const min = Math.min(...trend), max = Math.max(...trend), span = (max - min) || 1;
+    const pts = trend.map((w, i) => `${((i / (n - 1)) * 320).toFixed(0)},${(14 + ((max - w) / span) * 58).toFixed(0)}`).join(' ');
+    return `<svg width="100%" height="86" viewBox="0 0 320 86" preserveAspectRatio="none"><defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#30d158" stop-opacity=".35"/><stop offset="1" stop-color="#30d158" stop-opacity="0"/></linearGradient></defs>
+      <polygon points="${pts} 320,86 0,86" fill="url(#wg)"/>
+      <polyline points="${pts}" fill="none" stroke="#30d158" stroke-width="2.5"/></svg>`;
+  }
+  /** Map a fit_food_logs row → the meal shape the Food screen renders. */
+  function mapFoodRow(m) {
+    const t = m.created_at ? new Date(m.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : nowTime();
+    return {
+      name: m.name, sub: `${t} · ${Math.round(Number(m.protein))} g protein`,
+      kcal: Math.round(Number(m.kcal)), protein: Math.round(Number(m.protein)),
+      ai: /photo|ai/i.test(m.meal || ''),
+    };
+  }
 
   /* =========================================================
      Today (1a)
@@ -351,22 +377,24 @@ import { evaluateProgression } from './progression.js';
      Body (4b) + progress-photo compare (4c) — F6
      ========================================================= */
   function screenBody() {
+    const b = state.body;
+    const whr = (b.waist / b.hip).toFixed(2);
+    const wcColor = b.weekChange <= 0 ? 'var(--green)' : 'var(--orange)';
+    const wcStr = `${b.weekChange <= 0 ? '−' : '+'}${Math.abs(b.weekChange).toFixed(1)} kg`;
     return `<div class="route">
       <div class="pad">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin:6px 0 18px">
           <div style="font-size:26px;font-weight:700;letter-spacing:-.5px">Body</div><span style="font-size:13px;color:var(--muted-2)">Wed · 16 Jul</span></div>
         <div class="card" style="border-radius:20px;margin-bottom:14px">
           <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px">
-            <div><div style="font-size:12px;color:var(--muted-2);font-weight:600">Weight · today</div><div style="font-size:34px;font-weight:800;letter-spacing:-1px;margin-top:2px">74.2<span style="font-size:16px;color:var(--muted-2)">kg</span></div></div>
-            <div style="text-align:right"><div style="font-size:15px;font-weight:700;color:var(--green)">−1.2 kg</div><div style="font-size:11px;color:var(--muted-2)">this week</div></div></div>
-          <svg width="100%" height="86" viewBox="0 0 320 86" preserveAspectRatio="none"><defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#30d158" stop-opacity=".35"/><stop offset="1" stop-color="#30d158" stop-opacity="0"/></linearGradient></defs>
-            <polygon points="0,28 32,34 64,30 96,42 128,38 160,48 192,44 224,56 256,52 288,64 320,60 320,86 0,86" fill="url(#wg)"/>
-            <polyline points="0,28 32,34 64,30 96,42 128,38 160,48 192,44 224,56 256,52 288,64 320,60" fill="none" stroke="#30d158" stroke-width="2.5"/></svg>
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:6px"><span>35 days ago</span><span>today</span></div>
+            <div><div style="font-size:12px;color:var(--muted-2);font-weight:600">Weight · today</div><div style="font-size:34px;font-weight:800;letter-spacing:-1px;margin-top:2px">${fmtKg(b.weightKg)}<span style="font-size:16px;color:var(--muted-2)">kg</span></div></div>
+            <div style="text-align:right"><div style="font-size:15px;font-weight:700;color:${wcColor}">${wcStr}</div><div style="font-size:11px;color:var(--muted-2)">this week</div></div></div>
+          ${trendSvg(b.trend)}
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:6px"><span>${b.trend.length} days ago</span><span>today</span></div>
         </div>
         <div style="display:flex;gap:12px;margin-bottom:14px">
-          <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Waist / Hip</div><div style="font-size:20px;font-weight:800;margin-top:5px">82 / 96</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">WHR <b style="color:var(--text-2)">0.85</b></div></div>
-          <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Body fat</div><div style="font-size:20px;font-weight:800;margin-top:5px">≈ 16<span style="font-size:13px;color:var(--muted-2)">%</span></div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">scale estimate</div></div></div>
+          <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Waist / Hip</div><div style="font-size:20px;font-weight:800;margin-top:5px">${fmtKg(b.waist)} / ${fmtKg(b.hip)}</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">WHR <b style="color:var(--text-2)">${whr}</b></div></div>
+          <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Body fat</div><div style="font-size:20px;font-weight:800;margin-top:5px">≈ ${fmtKg(b.bf)}<span style="font-size:13px;color:var(--muted-2)">%</span></div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">scale estimate</div></div></div>
         <div style="display:flex;align-items:center;gap:10px;background:rgba(94,92,230,.1);border:1px solid rgba(148,140,255,.28);border-radius:14px;padding:13px;margin-bottom:16px">${AB}<span style="font-size:13px;line-height:1.4;color:#d8d6ff">Weekly tape due tomorrow — takes 20 seconds and sharpens my trend read.</span></div>
         <button class="btn btn-primary" data-action="log-weight" style="margin-bottom:10px">Log today's weigh-in</button>
         <button class="btn btn-ghost" data-action="nav:photos">Compare progress photos</button>
@@ -800,6 +828,50 @@ import { evaluateProgression } from './progression.js';
     if (today && today.exercises && today.exercises.length) { state.session = mapSession(today); state.exIdx = 0; }
     else state.session = SESSION_SEED();
   }
+  async function hydrateFood() {
+    const day = await BE.api.getFoodDay();
+    if (day && Array.isArray(day.meals)) state.meals = day.meals.map(mapFoodRow);
+    const s = await BE.api.getSettings();
+    if (s && s.targets) {
+      if (s.targets.kcal) state.kcalTarget = Number(s.targets.kcal);
+      if (s.targets.protein) state.proteinTarget = Number(s.targets.protein);
+    }
+  }
+  async function hydrateBody() {
+    const rows = await BE.api.getBodyTrend(35);
+    if (!rows || !rows.length) return;
+    const weights = rows.filter((r) => r.weight_kg != null).map((r) => Number(r.weight_kg));
+    if (weights.length) state.body.trend = weights;
+    const latest = rows[rows.length - 1];
+    if (latest.weight_kg != null) state.body.weightKg = Number(latest.weight_kg);
+    if (latest.waist_cm != null) state.body.waist = Number(latest.waist_cm);
+    if (latest.hip_cm != null) state.body.hip = Number(latest.hip_cm);
+    if (latest.bf_pct != null) state.body.bf = Number(latest.bf_pct);
+    const wc = weeklyChangeFromRows(rows);
+    if (wc != null) state.body.weekChange = wc;
+  }
+  async function hydrateCheckin() {
+    const c = await BE.api.getCheckin();
+    if (c) state.checkin = {
+      sleep: c.sleep_hours != null ? Number(c.sleep_hours) : state.checkin.sleep,
+      energy: c.energy || state.checkin.energy,
+      soreness: c.soreness || state.checkin.soreness,
+    };
+  }
+  async function hydrateReminders() {
+    const r = await BE.api.getReminders();
+    if (r && Object.keys(r).length) state.reminders = { ...state.reminders, ...r };
+  }
+  function weeklyChangeFromRows(rows) {
+    const pts = rows.filter((r) => r.weight_kg != null);
+    if (pts.length < 2) return null;
+    const latest = Number(pts[pts.length - 1].weight_kg);
+    const d = new Date(); d.setDate(d.getDate() - 7);
+    const cutoff = d.toISOString().slice(0, 10);
+    const earlier = pts.find((p) => p.log_date >= cutoff) || pts[0];
+    return Math.round((latest - Number(earlier.weight_kg)) * 10) / 10;
+  }
+  const settle = (p) => p.catch((e) => console.warn('[Gaspol] hydrate skipped:', e));
   async function boot() {
     try { if (!localStorage.getItem('gaspol_onboarded')) state.tab = 'onboarding'; } catch (e) { /* ignore */ }
     if (typeof window !== 'undefined' && window.GASPOL_CONFIG) {
@@ -807,7 +879,10 @@ import { evaluateProgression } from './progression.js';
         const mod = await import('./data.js');
         await mod.GaspolData.init();
         BE.api = mod.GaspolData; BE.on = true;
-        await hydrateSession();
+        // Hydrate every read-driven tab; each is best-effort so one failure
+        // (or an empty table) leaves that tab on its seed values.
+        await settle(hydrateSession());
+        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateCheckin()), settle(hydrateReminders())]);
       } catch (e) { console.warn('[Gaspol] backend unavailable — running on seed data.', e); BE.on = false; }
     }
     render();

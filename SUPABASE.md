@@ -70,14 +70,20 @@ To go live, front the seeds with `data.js` — no screen/render changes:
    ```html
    <script src="./config.js"></script>
    ```
-3. In `app.js`, replace the seed reads with the data layer at boot:
+3. That's it — `app.js` already does this. On boot, when `window.GASPOL_CONFIG`
+   is set it lazy-loads `data.js`, calls `GaspolData.init()`, and hydrates every
+   read-driven tab (best-effort, so an empty table just falls back to the seed):
    ```js
-   import { GaspolData } from './data.js';
    await GaspolData.init();
-   const today = await GaspolData.getTodaySession();   // → state.exName / state.sets …
+   await hydrateSession();   // getTodaySession()  → workout
+   await Promise.all([
+     hydrateFood(),          // getFoodDay() + getSettings().targets → Food + Today rings
+     hydrateBody(),          // getBodyTrend()   → Body chart / WHR / body-fat
+     hydrateCheckin(),       // getCheckin()     → Check-in
+     hydrateReminders(),     // getReminders()   → Reminders toggles
+   ]);
    ```
-   Keep the optimistic local updates the UI already does; each action also
-   calls through:
+   The optimistic local updates stay; each write action also calls through:
    | UI action            | data.js call |
    |----------------------|--------------|
    | log a set            | `logSet({exerciseId,setNumber,weight,reps})` (queues offline) |
