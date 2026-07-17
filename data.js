@@ -190,6 +190,14 @@ export const GaspolData = {
     const { error } = await table('fit_settings').upsert({ key, value, user_id: uid }, { onConflict: 'user_id,key' });
     if (error) throw error;
   },
+  /** Account/profile for Settings (F10): fit_settings.profile + auth email. */
+  async getProfile() {
+    const s = await this.getSettings();
+    const pr = s.profile || {};
+    let email = null;
+    try { const { data } = await sb.auth.getUser(); email = data?.user?.email || null; } catch (e) { /* not signed in */ }
+    return { name: pr.name || null, email, premium: !!pr.premium, goal: pr.goal || null, language: pr.language || null };
+  },
   async getReminders() { return (await this.getSettings()).reminders || {}; },
   async setReminder(key, on) { const r = await this.getReminders(); r[key] = on; return this.setSetting('reminders', r); },
   async getCoachNotes(limit = 10) {

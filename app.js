@@ -98,6 +98,7 @@ import { evaluateProgression } from './progression.js';
     photoView: 'front', photoCompare: 50,
     body: { weightKg: 74.2, weekChange: -1.2, waist: 82, hip: 96, bf: 16, trend: BODY_TREND.slice() },
     review: null,                 // hydrated from the latest coach note; falls back to SEED_REVIEW
+    profile: { name: 'Munir Sama', email: 'munir@email.com', joined: 'joined May 2026', premium: true },
     checkin: { sleep: 6.9, energy: 4, soreness: 4 },
     reminders: {
       sessionStart: true, weighIn: true, weeklyReview: true,
@@ -498,16 +499,24 @@ import { evaluateProgression } from './progression.js';
       </div></div>`;
   }
   function screenSettings() {
+    const pr = state.profile;
+    const initial = (pr.name || '?').trim().charAt(0).toUpperCase();
+    const premiumCard = pr.premium
+      ? `<div class="coach" style="margin-bottom:18px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:15px;font-weight:700;color:#fff">Gaspol Premium</span><span style="font-size:9px;font-weight:800;letter-spacing:.5px;color:#fff;background:rgba(255,255,255,.2);padding:3px 7px;border-radius:5px">ACTIVE</span></div>
+          <div style="font-size:13px;color:rgba(255,255,255,.75);line-height:1.45;margin-bottom:12px">Auto-progression, weekly AI review, food-photo AI, progress photos &amp; full history.</div>
+          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:22px;font-weight:800;color:#fff">Rp 39k</span><span style="font-size:13px;color:rgba(255,255,255,.6)">/ month · renews 1 Aug</span></div></div>`
+      : `<div class="coach" style="margin-bottom:18px;padding:16px">
+          <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:6px">Gaspol Premium</div>
+          <div style="font-size:13px;color:rgba(255,255,255,.75);line-height:1.45;margin-bottom:12px">Unlock auto-progression, the weekly AI review, food-photo AI &amp; progress photos.</div>
+          <button class="btn btn-primary" data-action="toast:Upgrade — Rp 39k / month" style="padding:12px">Upgrade · Rp 39k / mo</button></div>`;
     return `<div class="route">
       <div class="topbar"><button class="icon-btn" data-action="nav:today">‹</button><span class="t">Settings</span></div>
       <div class="pad" style="padding-top:0">
         <div class="srow" data-action="toast:Profile · coming soon" style="background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px;cursor:pointer">
-          <div style="display:flex;align-items:center;gap:14px"><div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#3a3a3c,#2a2a2c);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700">M</div>
-            <div><div style="font-size:17px;font-weight:700">Munir Sama</div><div class="sub">munir@email.com · joined May 2026</div></div></div><span style="color:var(--dim);font-size:20px">›</span></div>
-        <div class="coach" style="margin-bottom:18px;padding:16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:15px;font-weight:700;color:#fff">Gaspol Premium</span><span style="font-size:9px;font-weight:800;letter-spacing:.5px;color:#fff;background:rgba(255,255,255,.2);padding:3px 7px;border-radius:5px">ACTIVE</span></div>
-          <div style="font-size:13px;color:rgba(255,255,255,.75);line-height:1.45;margin-bottom:12px">Auto-progression, weekly AI review, food-photo AI, progress photos &amp; full history.</div>
-          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:22px;font-weight:800;color:#fff">Rp 39k</span><span style="font-size:13px;color:rgba(255,255,255,.6)">/ month · renews 1 Aug</span></div></div>
+          <div style="display:flex;align-items:center;gap:14px"><div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#3a3a3c,#2a2a2c);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700">${esc(initial)}</div>
+            <div><div style="font-size:17px;font-weight:700">${esc(pr.name || 'Your account')}</div><div class="sub">${esc([pr.email, pr.joined].filter(Boolean).join(' · '))}</div></div></div><span style="color:var(--dim);font-size:20px">›</span></div>
+        ${premiumCard}
         <div class="section-label">PREFERENCES</div>
         <div class="group">
           <div class="srow" data-action="toast:Language · English"><span class="n">Language</span><span class="val">English ›</span></div>
@@ -890,6 +899,13 @@ import { evaluateProgression } from './progression.js';
     const rv = await BE.api.getWeeklyReview();
     if (rv) state.review = rv;
   }
+  async function hydrateProfile() {
+    const p = await BE.api.getProfile();
+    if (!p) return;
+    if (p.name) state.profile.name = p.name;
+    if (p.email) { state.profile.email = p.email; state.profile.joined = ''; }
+    if (typeof p.premium === 'boolean') state.profile.premium = p.premium;
+  }
   function weeklyChangeFromRows(rows) {
     const pts = rows.filter((r) => r.weight_kg != null);
     if (pts.length < 2) return null;
@@ -910,7 +926,7 @@ import { evaluateProgression } from './progression.js';
         // Hydrate every read-driven tab; each is best-effort so one failure
         // (or an empty table) leaves that tab on its seed values.
         await settle(hydrateSession());
-        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateCheckin()), settle(hydrateReminders()), settle(hydrateReview())]);
+        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateCheckin()), settle(hydrateReminders()), settle(hydrateReview()), settle(hydrateProfile())]);
       } catch (e) { console.warn('[Gaspol] backend unavailable — running on seed data.', e); BE.on = false; }
     }
     render();

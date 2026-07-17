@@ -18,8 +18,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   // Guard: only the scheduler (or an operator) with the secret may run this.
+  // Fail closed — if CRON_SECRET isn't configured, refuse every request so a
+  // freshly deployed function is never an open, data-mutating endpoint.
   const secret = Deno.env.get("CRON_SECRET");
-  if (secret && req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
+  if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
 
   const sb = adminClient();
   const since = isoDaysAgo(DAYS);
