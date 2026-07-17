@@ -60,7 +60,7 @@ async function reviewUser(sb: ReturnType<typeof adminClient>, userId: string | n
 
   // --- Progression per exercise ----------------------------------------
   const byExercise = groupSessions(setLogs ?? []); // exercise_id -> Session[] (chronological)
-  const changes: string[] = [];
+  const changes: Array<{ kind: string; label: string; detail: string }> = [];
   for (const ex of exercises ?? []) {
     const sessions: Session[] = byExercise[ex.id] ?? [];
     if (sessions.length === 0) continue;
@@ -68,7 +68,7 @@ async function reviewUser(sb: ReturnType<typeof adminClient>, userId: string | n
     if (r.action !== "hold" && r.newWeight !== Number(ex.current_weight)) {
       const upd = sb.from("fit_exercises").update({ current_weight: r.newWeight }).eq("id", ex.id);
       await (userId ? upd.eq("user_id", userId) : upd);
-      changes.push(`${ex.name}: ${r.reason}`);
+      changes.push({ kind: "progression", label: `${ex.name} → ${r.newWeight} kg`, detail: r.reason });
     }
   }
 
@@ -78,37 +78,42 @@ async function reviewUser(sb: ReturnType<typeof adminClient>, userId: string | n
   const cal = adjustCalories(targets.kcal ?? 2150, weeklyChange, goal, bw);
   if (cal.delta !== 0) {
     const newTargets = { ...targets, kcal: cal.newTarget };
-    const upd = sb.from("fit_settings").upsert(
+    await sb.from("fit_settings").upsert(
       { key: "targets", value: newTargets, ...(userId ? { user_id: userId } : {}) },
       { onConflict: userId ? "user_id,key" : "key" },
     );
-    await upd;
-    changes.push(`Calories → ${cal.newTarget} (${cal.delta > 0 ? "+" : ""}${cal.delta}): ${cal.reason}`);
+    changes.push({ kind: "calories", label: `Calories → ${cal.newTarget} (${cal.delta > 0 ? "+" : ""}${cal.delta})`, detail: cal.reason });
   }
 
-  // --- Adherence + nutrition facts for the note ------------------------
-  const trainingDays = uniq((setLogs ?? []).map((s: { log_date: string }) => s.log_date)).length;
-  const proteinAvg = avgDailyProtein(foods ?? []);
+  // --- Weekly stats: this week vs the previous week ---------------------
+  const weekAgo = isoDaysAgo(7);
+  const daysPerWeek = (profile as { daysPerWeek?: number }).daysPerWeek ?? 6;
+  const trainingDays = uniq((setLogs ?? []).filter((s: { log_date: string }) => s.log_date >= weekAgo).map((s: { log_date: string }) => s.log_date)).length;
+  let volThis = 0, volPrev = 0;
+  for (const s of (setLogs ?? []) as Array<{ log_date: string; weight: number; reps: number }>) {
+    const v = Number(s.weight) * Number(s.reps);
+    if (s.log_date >= weekAgo) volThis += v; else volPrev += v;
+  }
+  const stats = {
+    sessions: trainingDays,
+    sessionsTarget: daysPerWeek,
+    adherencePct: Math.min(100, Math.round((trainingDays / daysPerWeek) * 100)),
+    volumePct: volPrev > 0 ? Math.round(((volThis - volPrev) / volPrev) * 100) : 0,
+    proteinAvg: Math.round(avgDailyProtein((foods ?? []).filter((f: { log_date: string }) => f.log_date >= weekAgo))),
+    proteinFloor: targets.protein ?? 155,
+    weightChange: round1(weeklyChange),
+  };
 
   // --- Coach note (Claude) ---------------------------------------------
-  const facts = {
-    name: profile.name ?? "there",
-    language: profile.language ?? "en",
-    goal,
-    trainingDays,
-    weeklyChangeKg: round1(weeklyChange),
-    proteinAvg: Math.round(proteinAvg),
-    proteinFloor: targets.protein ?? 155,
-    changes,
-  };
+  const facts = { name: profile.name ?? "there", language: profile.language ?? "en", goal, stats, changes };
   const note = await writeCoachNote(facts);
 
-  const insert = sb.from("fit_coach_notes").insert({
-    title: note.title, body: note.body, ...(userId ? { user_id: userId } : {}),
+  await sb.from("fit_coach_notes").insert({
+    title: note.title, body: note.body, data: { stats, changes },
+    ...(userId ? { user_id: userId } : {}),
   });
-  await insert;
 
-  return { userId, trainingDays, weeklyChangeKg: facts.weeklyChangeKg, changes, note };
+  return { userId, stats, changes, note };
 }
 
 async function writeCoachNote(facts: Record<string, unknown>): Promise<{ title: string; body: string }> {
@@ -124,10 +129,12 @@ warm and direct, never shaming. Explain the "why" behind any change. Write in th
     if (m) return JSON.parse(m[0]);
   } catch (_) { /* fall through to a deterministic note */ }
   // Fallback so the review still posts if the AI call fails.
+  const st = (facts.stats as { sessions?: number; weightChange?: number }) ?? {};
+  const chg = (facts.changes as Array<{ label: string }>) ?? [];
   return {
-    title: facts.trainingDays ? "Another week logged." : "Let's restart this week.",
-    body: `${facts.trainingDays} sessions in, weight change ${facts.weeklyChangeKg} kg. ` +
-      ((facts.changes as string[]).length ? `Changes: ${(facts.changes as string[]).join("; ")}.` : "No plan changes — keep pushing reps."),
+    title: st.sessions ? "Another week logged." : "Let's restart this week.",
+    body: `${st.sessions ?? 0} sessions in, weight change ${st.weightChange ?? 0} kg. ` +
+      (chg.length ? `Changes: ${chg.map((c) => c.label).join("; ")}.` : "No plan changes — keep pushing reps."),
   };
 }
 

@@ -45,6 +45,18 @@ import { evaluateProgression } from './progression.js';
     for (let i = 0; i < 35; i++) { w -= 0.04 + (i % 5 === 0 ? 0.02 : 0); a.push(Math.round(w * 10) / 10); }
     a[a.length - 1] = 74.2; return a;
   })();
+  // Weekly review seed (demo). Replaced by the latest fit_coach_notes row (F8).
+  const SEED_REVIEW = {
+    title: 'Strong week, Munir.',
+    body: 'Adherence is carrying this cut — every session in, weight bang on trend. The one gap is protein: three days under 155 g. Fix that and next week is another clean progression. Keep going.',
+    stats: { sessions: 6, sessionsTarget: 6, adherencePct: 100, volumePct: 8, proteinAvg: 149, proteinFloor: 155, weightChange: -1.1 },
+    changes: [
+      { kind: 'progression', label: 'Thursday bench → 64 kg (+2.5)', detail: 'Top sets cleared 8 reps two weeks running.' },
+      { kind: 'calories', label: 'Calories → 2,100 (-50)', detail: 'Weight loss slowed to 0.4%/wk — nudging the deficit.' },
+      { kind: 'reminder', label: 'Protein reminder at 15:00', detail: 'You landed under the floor 3 days this week.' },
+    ],
+  };
+  const CHANGE_COLOR = { progression: 'var(--green)', calories: 'var(--orange)', reminder: '#64d2ff', swap: '#8f8bff' };
 
   /* ---------- Today's session (Push A) ----------------------- */
   function mkEx(name, isCompound, sets, repLow, repHigh, weight, increment, prev, progressed) {
@@ -85,6 +97,7 @@ import { evaluateProgression } from './progression.js';
     portionIdx: 2,
     photoView: 'front', photoCompare: 50,
     body: { weightKg: 74.2, weekChange: -1.2, waist: 82, hip: 96, bf: 16, trend: BODY_TREND.slice() },
+    review: null,                 // hydrated from the latest coach note; falls back to SEED_REVIEW
     checkin: { sleep: 6.9, energy: 4, soreness: 4 },
     reminders: {
       sessionStart: true, weighIn: true, weeklyReview: true,
@@ -564,27 +577,38 @@ import { evaluateProgression } from './progression.js';
   /* =========================================================
      Weekly review (1e) — F8
      ========================================================= */
+  /** Colour a trailing "(+2.5)" / "(-50)" delta inside a change label. */
+  function changeLabelHtml(label) {
+    const m = String(label).match(/^(.*?)\(([+−-][^)]*)\)\s*$/);
+    if (!m) return esc(label);
+    const color = /^\+/.test(m[2]) ? 'var(--green)' : (/^[−-]/.test(m[2]) ? 'var(--orange)' : 'var(--muted-2)');
+    return `${esc(m[1])}<span style="color:${color};font-weight:600">(${esc(m[2])})</span>`;
+  }
   function screenReview() {
+    const rv = state.review || SEED_REVIEW;
+    const st = rv.stats || SEED_REVIEW.stats;
     const sw = state.session.exercises.find((e) => e.swappedFrom);
-    const swapChange = sw ? `<div class="change"><div class="dot" style="background:#8f8bff"></div>
-      <div><div class="t">${esc(sw.swappedFrom)} → ${esc(sw.name)}</div><div class="d">Swapped mid-session — Coach re-estimated the load so progression still counts.</div></div></div>` : '';
+    const swapChange = sw ? [{ kind: 'swap', label: `${sw.swappedFrom} → ${sw.name}`, detail: 'Swapped mid-session — Coach re-estimated the load so progression still counts.' }] : [];
+    const changes = swapChange.concat(rv.changes && rv.changes.length ? rv.changes : SEED_REVIEW.changes);
+    const wc = st.weightChange;
+    const wcStr = `${wc <= 0 ? '−' : '+'}${Math.abs(wc).toFixed(1)}`;
+    const changesHtml = changes.map((c, i) => `<div class="change"${i === changes.length - 1 ? ' style="margin-bottom:16px"' : ''}>
+      <div class="dot" style="background:${CHANGE_COLOR[c.kind] || 'var(--green)'}"></div>
+      <div><div class="t">${changeLabelHtml(c.label)}</div><div class="d">${esc(c.detail)}</div></div></div>`).join('');
     return `<div>
       <div class="review-head"><button class="icon-btn" data-action="nav:today" style="font-size:18px">‹</button>
         <div><div class="sess-kicker">WEEKLY REVIEW</div><div class="sess-name">13–19 Jul · Week 3</div></div></div>
       <div class="pad" style="padding-top:0">
-        <div class="review-verdict"><div class="ai-badge lg">AI</div><div><div class="l">COACH</div><div class="v">Strong week, Munir.</div></div></div>
+        <div class="review-verdict"><div class="ai-badge lg">AI</div><div><div class="l">COACH</div><div class="v">${esc(rv.title)}</div></div></div>
         <div class="stat-grid">
-          <div class="stat-cell"><div class="k">Sessions</div><div class="n">6<span style="font-size:14px;color:var(--muted-2)">/6</span></div><div class="s" style="color:var(--green)">100% adherence</div></div>
-          <div class="stat-cell"><div class="k">Volume</div><div class="n" style="color:var(--green)">+8%</div><div class="s">vs last week</div></div>
-          <div class="stat-cell"><div class="k">Protein avg</div><div class="n" style="color:var(--orange)">149<span style="font-size:14px;color:var(--muted-2)">g</span></div><div class="s">under 155 g floor</div></div>
-          <div class="stat-cell"><div class="k">Weight</div><div class="n" style="color:var(--green)">−1.1<span style="font-size:14px;color:var(--muted-2)">kg</span></div><div class="s">on trend</div></div></div>
+          <div class="stat-cell"><div class="k">Sessions</div><div class="n">${st.sessions}<span style="font-size:14px;color:var(--muted-2)">/${st.sessionsTarget}</span></div><div class="s" style="color:var(--green)">${st.adherencePct}% adherence</div></div>
+          <div class="stat-cell"><div class="k">Volume</div><div class="n" style="color:${st.volumePct >= 0 ? 'var(--green)' : 'var(--orange)'}">${st.volumePct >= 0 ? '+' : ''}${st.volumePct}%</div><div class="s">vs last week</div></div>
+          <div class="stat-cell"><div class="k">Protein avg</div><div class="n" style="color:var(--orange)">${st.proteinAvg}<span style="font-size:14px;color:var(--muted-2)">g</span></div><div class="s">${st.proteinAvg < st.proteinFloor ? `under ${st.proteinFloor} g floor` : 'hit the floor'}</div></div>
+          <div class="stat-cell"><div class="k">Weight</div><div class="n" style="color:${wc <= 0 ? 'var(--green)' : 'var(--orange)'}">${wcStr}<span style="font-size:14px;color:var(--muted-2)">kg</span></div><div class="s">on trend</div></div></div>
         <div class="section-label">CHANGES I MADE</div>
-        ${swapChange}
-        <div class="change"><div class="dot" style="background:var(--green)"></div><div><div class="t">Thursday bench → 64 kg <span style="color:var(--green);font-weight:600">(+2.5)</span></div><div class="d">Top sets cleared 8 reps two weeks running.</div></div></div>
-        <div class="change"><div class="dot" style="background:var(--orange)"></div><div><div class="t">Calories → 2,100 <span style="color:var(--orange);font-weight:600">(−50)</span></div><div class="d">Weight loss slowed to 0.4%/wk — nudging the deficit.</div></div></div>
-        <div class="change" style="margin-bottom:16px"><div class="dot" style="background:#64d2ff"></div><div><div class="t">Protein reminder at 15:00</div><div class="d">You landed under the floor 3 days this week.</div></div></div>
+        ${changesHtml}
         <div class="coach"><div class="coach-head">${AB}<span class="coach-title">Coach note</span></div>
-          <p>Adherence is carrying this cut — every session in, weight bang on trend. The one gap is protein: three days under 155&nbsp;g. Fix that and next week is another clean progression. <b>Keep going.</b></p></div>
+          <p>${esc(rv.body)}</p></div>
       </div></div>`;
   }
 
@@ -862,6 +886,10 @@ import { evaluateProgression } from './progression.js';
     const r = await BE.api.getReminders();
     if (r && Object.keys(r).length) state.reminders = { ...state.reminders, ...r };
   }
+  async function hydrateReview() {
+    const rv = await BE.api.getWeeklyReview();
+    if (rv) state.review = rv;
+  }
   function weeklyChangeFromRows(rows) {
     const pts = rows.filter((r) => r.weight_kg != null);
     if (pts.length < 2) return null;
@@ -882,7 +910,7 @@ import { evaluateProgression } from './progression.js';
         // Hydrate every read-driven tab; each is best-effort so one failure
         // (or an empty table) leaves that tab on its seed values.
         await settle(hydrateSession());
-        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateCheckin()), settle(hydrateReminders())]);
+        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateCheckin()), settle(hydrateReminders()), settle(hydrateReview())]);
       } catch (e) { console.warn('[Gaspol] backend unavailable — running on seed data.', e); BE.on = false; }
     }
     render();

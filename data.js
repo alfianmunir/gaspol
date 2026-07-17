@@ -198,6 +198,13 @@ export const GaspolData = {
     return data || [];
   },
   async getLatestReview() { return (await this.getCoachNotes(1))[0] || null; },
+  /** Latest weekly review shaped for the Progress screen (F8). */
+  async getWeeklyReview() {
+    const n = await this.getLatestReview();
+    if (!n) return null;
+    const d = n.data || {};
+    return { title: n.title, body: n.body, date: n.note_date, stats: d.stats || null, changes: d.changes || [] };
+  },
 
   /* Preview an adjustment in the UI without a round-trip. */
   previewCalorieAdjust: adjustCalories,
