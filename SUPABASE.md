@@ -1,12 +1,76 @@
-# Supabase backend — setup & wiring
+# Supabase backend — status & remaining steps
 
-This scaffolds the data layer and Edge Functions for Gaspol on the existing
-Supabase project (`ticdiatbdxkmpzmqvntn`, region `ap-southeast-1`). See
-[BACKEND.md](./BACKEND.md) for *why* Supabase. That project is **shared** with
-"No Bites Left" — everything here only touches `fit_*` tables and `fit-*`
-functions.
+Backend for Gaspol on the existing project (`ticdiatbdxkmpzmqvntn`, region
+`ap-southeast-1`). See [BACKEND.md](./BACKEND.md) for *why* Supabase. That project
+is **shared** with "No Bites Left" — everything here only touches `fit_*` tables,
+a new `fit-photos` bucket, and `fit-*` functions.
 
-## What's in the repo
+## ✅ Already applied to the live project
+
+- **Additive migration** (`migrations/20260716120000_fit_additive.sql`) — added
+  `user_id` columns (nullable), upsert indexes, `fit_coach_notes.data` (F8), the
+  `fit_photos` table, and the private `fit-photos` storage bucket. **Non-breaking:**
+  the prototype's open `fit anon all` policies are still in place, so existing data
+  (41 exercises, settings, etc.) stays visible.
+- **Edge functions deployed** (ACTIVE): `fit-food-estimate` (verify_jwt=true) and
+  `fit-weekly-review` (verify_jwt=false; fails closed with 403 until `CRON_SECRET`
+  is set, so it is never an open endpoint).
+
+## ⏭ Remaining (manual — needs your keys / decisions)
+
+1. **Set function secrets** (both functions need these to actually run):
+   ```bash
+   supabase link --project-ref ticdiatbdxkmpzmqvntn
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...  CRON_SECRET=$(openssl rand -hex 24)
+   ```
+   Until `ANTHROPIC_API_KEY` is set the functions return 500 at the Claude call;
+   until `CRON_SECRET` is set `fit-weekly-review` returns 403 to everyone.
+
+2. **Schedule the Sunday review** (Dashboard → SQL editor): enable `pg_cron` +
+   `pg_net`, store the Vault secrets, then run `supabase/schedules.sql`
+   (Sundays 19:00 WIB). Test by hand once secrets are set:
+   ```bash
+   curl -X POST "https://ticdiatbdxkmpzmqvntn.supabase.co/functions/v1/fit-weekly-review" \
+     -H "x-cron-secret: $CRON_SECRET"
+   ```
+
+3. **Point the frontend at the backend** (on Vercel). The app reads the backend
+   only when `window.GASPOL_CONFIG` is set. Create `config.js` (gitignored) next to
+   `index.html` and uncomment its `<script>` tag in `index.html`:
+   ```js
+   window.GASPOL_CONFIG = {
+     url: "https://ticdiatbdxkmpzmqvntn.supabase.co",
+     anonKey: "sb_publishable_…"   // publishable key from the dashboard (public by design)
+   };
+   ```
+   On boot `app.js` lazy-loads `data.js`, calls `GaspolData.init()`, and hydrates
+   every read-driven tab (best-effort — an empty table falls back to seed):
+   `hydrateSession / hydrateFood / hydrateBody / hydrateCheckin / hydrateReminders /
+   hydrateReview / hydrateProfile`.
+
+4. **Enforce per-user RLS — LATER, after auth.** `migrations/20260716120100_fit_rls_enforce.sql`
+   is **not applied**. It replaces the open policies with per-user ones and is
+   **destructive to the single-user prototype** until you add auth (email/Google)
+   and backfill `user_id` on existing rows (statements in that file's header). Run
+   it only then.
+
+## Frontend write paths (already wired)
+
+| UI action | data.js call |
+|-----------|--------------|
+| log a set | `logSet({exerciseId,setNumber,weight,reps})` (queues offline) |
+| finish session | `applyProgression(exercise, recentSessions)` |
+| quick-add / log meal | `logFood({...})` |
+| snap a meal | `estimateFoodPhoto(file)` → `logFood(...)` |
+| weigh-in | `logWeighIn({weightKg,...})` |
+| save check-in | `saveCheckin({sleepHours,energy,soreness})` |
+| toggle a reminder | `setReminder(key, on)` |
+| open Progress | `getWeeklyReview()` |
+
+`data.js` scopes every read/write to the signed-in user and queues set logs in
+IndexedDB, flushing when back online — so gym logging works with no signal.
+
+## Repo layout
 
 ```
 progression.js                         Auto-progression + calorie rules (F3/F8), browser
@@ -16,7 +80,9 @@ supabase/
   config.toml                          CLI project link + per-function verify_jwt
   .env.example                         Function secrets (ANTHROPIC_API_KEY, CRON_SECRET)
   schedules.sql                        pg_cron entry for the Sunday review
-  migrations/20260716120000_fit_multiuser.sql   user_id + RLS + photos + storage
+  migrations/
+    20260716120000_fit_additive.sql       APPLIED — non-breaking multi-user prep + F8 col + photos
+    20260716120100_fit_rls_enforce.sql    NOT applied — per-user RLS lockdown (after auth + backfill)
   functions/
     _shared/                           cors, admin/user clients, claude helper, progression.ts
     fit-food-estimate/index.ts         F5 — AI food-photo estimate (premium)
@@ -26,81 +92,9 @@ supabase/
 `progression.js` (browser) and `functions/_shared/progression.ts` (Deno) are the
 **same rules** in two runtimes — edit both together.
 
-## 1. Database (multi-user)
-
-The migration turns the single-user prototype into per-user RLS.
-
-```bash
-supabase link --project-ref ticdiatbdxkmpzmqvntn
-supabase db reset            # local first — verify against a local stack
-# then, when happy:
-supabase migration up        # applies to the linked project
-```
-
-Before RLS is enforced, backfill existing prototype rows with your uid (the
-migration header has the exact statements). The migration also creates the
-private `fit-photos` storage bucket (F6) and its per-user object policies.
-
-## 2. Edge Functions
-
-```bash
-supabase secrets set ANTHROPIC_API_KEY=sk-ant-...  CRON_SECRET=$(openssl rand -hex 24)
-supabase functions deploy fit-food-estimate                 # verify_jwt=true (config.toml)
-supabase functions deploy fit-weekly-review --no-verify-jwt
-```
-
-Then schedule the review (Dashboard → SQL editor): enable `pg_cron` + `pg_net`,
-store the two Vault secrets, and run `supabase/schedules.sql` (Sundays 19:00 WIB).
-
-Test the review by hand:
-
-```bash
-curl -X POST "$SUPABASE_URL/functions/v1/fit-weekly-review" \
-  -H "x-cron-secret: $CRON_SECRET"
-```
-
-## 3. Wire the frontend
-
-The app currently runs on seeded persona data (so the demo needs no backend).
-To go live, front the seeds with `data.js` — no screen/render changes:
-
-1. `cp config.example.js config.js` and fill `url` + `anonKey`
-   (Supabase MCP: `get_project_url`, `get_publishable_keys`).
-2. In `index.html`, before `app.js`:
-   ```html
-   <script src="./config.js"></script>
-   ```
-3. That's it — `app.js` already does this. On boot, when `window.GASPOL_CONFIG`
-   is set it lazy-loads `data.js`, calls `GaspolData.init()`, and hydrates every
-   read-driven tab (best-effort, so an empty table just falls back to the seed):
-   ```js
-   await GaspolData.init();
-   await hydrateSession();   // getTodaySession()  → workout
-   await Promise.all([
-     hydrateFood(),          // getFoodDay() + getSettings().targets → Food + Today rings
-     hydrateBody(),          // getBodyTrend()   → Body chart / WHR / body-fat
-     hydrateCheckin(),       // getCheckin()     → Check-in
-     hydrateReminders(),     // getReminders()   → Reminders toggles
-   ]);
-   ```
-   The optimistic local updates stay; each write action also calls through:
-   | UI action            | data.js call |
-   |----------------------|--------------|
-   | log a set            | `logSet({exerciseId,setNumber,weight,reps})` (queues offline) |
-   | finish session       | `applyProgression(exercise, recentSessions)` |
-   | quick-add / log meal  | `logFood({...})` |
-   | snap a meal          | `estimateFoodPhoto(file)` → `logFood(...)` |
-   | weigh-in             | `logWeighIn({weightKg,...})` |
-   | save check-in        | `saveCheckin({sleepHours,energy,soreness})` |
-   | toggle a reminder    | `setReminder(key, on)` |
-   | open Progress        | `getLatestReview()` / `getCoachNotes()` |
-
-`data.js` scopes every read/write to the signed-in user and queues set logs in
-IndexedDB, flushing when back online — so gym logging works with no signal.
-
 ## Notes
 
-- Anon/publishable key is public by design; RLS is the real guard. Never commit
-  `config.js` or the service-role key (both gitignored / server-only).
+- Anon/publishable key is public by design; RLS is the real guard. Never commit the
+  service-role key.
 - Cost control (PRD §10): the review is 1 Claude call/user/week; food-photo is
   premium-gated in `fit-food-estimate` via `fit_settings.profile.premium`.
