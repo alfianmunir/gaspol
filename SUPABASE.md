@@ -45,8 +45,8 @@ a new `fit-photos` bucket, and `fit-*` functions.
    ```
    On boot `app.js` lazy-loads `data.js`, calls `GaspolData.init()`, and hydrates
    every read-driven tab (best-effort — an empty table falls back to seed):
-   `hydrateSession / hydrateFood / hydrateBody / hydrateCheckin / hydrateReminders /
-   hydrateReview / hydrateProfile`.
+   `hydrateSession / hydrateFood / hydrateBody / hydrateScan / hydrateCheckin /
+   hydrateCheckinHistory / hydrateReminders / hydrateReview / hydrateProfile`.
 
 4. **Enforce per-user RLS — LATER, after auth.** `migrations/20260716120100_fit_rls_enforce.sql`
    is **not applied**. It replaces the open policies with per-user ones and is
@@ -66,6 +66,8 @@ a new `fit-photos` bucket, and `fit-*` functions.
 | save check-in | `saveCheckin({sleepHours,energy,soreness})` |
 | toggle a reminder | `setReminder(key, on)` |
 | open Progress | `getWeeklyReview()` |
+| open Body → scan card | `getScan()` (latest `fit_body_metrics` row with a `scan` payload) |
+| Today/Check-in recovery signal | `getCheckinHistory(7)` (last 7 `fit_checkins`, oldest→newest) |
 
 `data.js` scopes every read/write to the signed-in user and queues set logs in
 IndexedDB, flushing when back online — so gym logging works with no signal.

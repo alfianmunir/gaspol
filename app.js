@@ -1292,6 +1292,31 @@ import { evaluateProgression } from './progression.js';
       soreness: c.soreness || state.checkin.soreness,
     };
   }
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fmtScanDate(iso) {
+    if (!iso) return state.scan.date;
+    const d = new Date(iso + 'T00:00:00');
+    return Number.isNaN(d.getTime()) ? iso : `${d.getDate()} ${MON[d.getMonth()]}`;
+  }
+  async function hydrateScan() {
+    const sc = await BE.api.getScan();
+    if (!sc || !sc.segments) return; // no scan on file → keep the seed card
+    state.scan = {
+      date: fmtScanDate(sc.date),
+      bmi: sc.bmi ?? state.scan.bmi, bmr: sc.bmr ?? state.scan.bmr,
+      visceral: sc.visceral ?? state.scan.visceral, bodyAge: sc.bodyAge ?? state.scan.bodyAge,
+      musclePct: sc.musclePct ?? state.scan.musclePct, fatPct: sc.fatPct ?? state.scan.fatPct,
+      whr: sc.whr ?? state.scan.whr, segments: sc.segments,
+    };
+  }
+  async function hydrateCheckinHistory() {
+    const h = await BE.api.getCheckinHistory(7);
+    if (!h || !h.length) return; // no logged check-ins yet → keep the 7-day seed
+    state.checkinHistory = h.map((x) => ({
+      sleep: x.sleep != null ? x.sleep : state.checkin.sleep,
+      energy: x.energy || 3, soreness: x.soreness || 2,
+    }));
+  }
   async function hydrateReminders() {
     const r = await BE.api.getReminders();
     if (r && Object.keys(r).length) state.reminders = { ...state.reminders, ...r };
@@ -1327,7 +1352,7 @@ import { evaluateProgression } from './progression.js';
         // Hydrate every read-driven tab; each is best-effort so one failure
         // (or an empty table) leaves that tab on its seed values.
         await settle(hydrateSession());
-        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateCheckin()), settle(hydrateReminders()), settle(hydrateReview()), settle(hydrateProfile())]);
+        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateScan()), settle(hydrateCheckin()), settle(hydrateCheckinHistory()), settle(hydrateReminders()), settle(hydrateReview()), settle(hydrateProfile())]);
       } catch (e) { console.warn('[Gaspol] backend unavailable — running on seed data.', e); BE.on = false; }
     }
     render();

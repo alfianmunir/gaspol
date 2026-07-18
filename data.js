@@ -199,11 +199,48 @@ export const GaspolData = {
     return data;
   },
 
+  /**
+   * Latest segmental body-composition scan (E6). Returns the newest
+   * fit_body_metrics row carrying a `scan` payload, shaped for the UI's
+   * scan card (per-segment muscle/fat in kg + the headline stats).
+   */
+  async getScan() {
+    const { data, error } = await read('fit_body_metrics')
+      .not('scan', 'is', null).order('log_date', { ascending: false }).limit(1);
+    if (error) throw error;
+    const row = (data || [])[0];
+    if (!row) return null;
+    const s = row.scan || {};
+    return {
+      date: row.log_date,
+      bmi: numOrNull(row.bmi),
+      bmr: numOrNull(row.bmr_kcal),
+      visceral: numOrNull(row.visceral_fat),
+      whr: numOrNull(row.whr),
+      bodyAge: s.body_age ?? null,
+      musclePct: s.muscle_pct ?? null,
+      fatPct: s.fat_pct ?? numOrNull(row.bf_pct),
+      segments: mapSegments(s.segments),
+    };
+  },
+
   /* ---------- Daily check-in (F7) ------------------------- */
   async getCheckin(logDate = today()) {
     const { data, error } = await read('fit_checkins').eq('log_date', logDate).maybeSingle();
     if (error) throw error;
     return data;
+  },
+  /** Last N days of check-ins, oldest→newest, for the recovery signal (E8). */
+  async getCheckinHistory(days = 7) {
+    const { data, error } = await read('fit_checkins')
+      .gte('log_date', daysAgo(days)).order('log_date');
+    if (error) throw error;
+    return (data || []).map((r) => ({
+      date: r.log_date,
+      sleep: numOrNull(r.sleep_hours),
+      energy: r.energy ?? null,
+      soreness: r.soreness ?? null,
+    }));
   },
   async saveCheckin({ sleepHours, sleepQuality = null, energy, soreness, notes = null, logDate = today() }) {
     const { data, error } = await table('fit_checkins')
@@ -282,6 +319,16 @@ function jakartaDow() {
 function today() { return new Intl.DateTimeFormat('en-CA', { timeZone: JKT }).format(new Date()); }
 function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return new Intl.DateTimeFormat('en-CA', { timeZone: JKT }).format(d); }
 function fmtKg(v) { const n = Number(v); return Number.isInteger(n) ? String(n) : n.toFixed(1); }
+function numOrNull(v) { return v == null ? null : Number(v); }
+/** Normalise a scan's segment payload ({muscle_kg,fat_kg}) to the UI's {m,f} shape. */
+function mapSegments(seg) {
+  if (!seg || typeof seg !== 'object') return null;
+  const out = {};
+  for (const [k, v] of Object.entries(seg)) {
+    if (v && (v.muscle_kg != null || v.fat_kg != null)) out[k] = { m: numOrNull(v.muscle_kg) ?? 0, f: numOrNull(v.fat_kg) ?? 0 };
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 async function lastLogsByExercise(ids) {
   if (!ids.length) return {};
