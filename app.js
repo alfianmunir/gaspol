@@ -106,7 +106,7 @@ import { evaluateProgression } from './progression.js';
     // onboarding wizard (E2): program → experience → frequency → body-comp
     obStep: 0, obGoal: 'cut', obExp: 'intermediate', obFreq: 6,
     // body-composition intake (6a) — seeded with Munir's real tape
-    iVals: { ...IVALS_SEED }, iEdit: null, iBuf: '', iUpperOpen: true, iLowerOpen: false, iGen: false, iReturn: 'today',
+    iVals: { ...IVALS_SEED }, iEdit: null, iBuf: '', iUpperOpen: true, iLowerOpen: false, iGen: false, iReturn: 'today', plan: null,
     // workout — a full multi-exercise session
     session: SESSION_SEED(), exIdx: 0,
     rest: 0, restTotal: 90,
@@ -655,12 +655,36 @@ import { evaluateProgression } from './progression.js';
     // Step 3 — body composition (6a) with keypad + generated overlay
     if (step === 3) {
       const bc = bodyCompFields();
-      const overlay = state.iGen ? `<div style="position:absolute;inset:0;background:rgba(10,10,11,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:44px;text-align:center;z-index:20">
-          <div style="width:76px;height:76px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:38px;color:var(--green-ink);font-weight:900;margin-bottom:20px">✓</div>
-          <div style="font-size:22px;font-weight:800;letter-spacing:-.3px">Rencana kamu siap</div>
-          <div style="font-size:13.5px;color:var(--muted-2);margin-top:9px;line-height:1.55">6-day Push/Pull/Legs · ${GOALS.find((g) => g[0] === state.obGoal)[1]} −400 kcal · WHR ${bc.whr} jadi fokus utama. <span style="color:var(--dim)">Your plan is generated.</span></div>
-          <button class="btn btn-primary" data-action="ob-start" style="margin-top:24px;max-width:220px">Mulai Push A · Start →</button>
-          <button data-action="i-reset" style="margin-top:10px;background:transparent;border:none;color:var(--indigo-3);font-size:14px;font-weight:700;cursor:pointer">Ubah lagi · Back</button>
+      const p = state.plan || computePlan();
+      const macroRow = (name, val, why, color) => `<div class="srow" style="align-items:flex-start"><div style="flex:1"><div class="n">${name}</div><div class="sub">${why}</div></div><div style="font-size:15px;font-weight:800;color:${color || 'var(--text)'};white-space:nowrap;margin-left:10px">${val}</div></div>`;
+      const split = [['Sen·Mon', 'Push A', '~52m'], ['Sel·Tue', 'Pull A', '~50m'], ['Rab·Wed', 'Legs A', '~55m'], ['Kam·Thu', 'Push B', '~52m'], ['Jum·Fri', 'Pull B', '~50m'], ['Sab·Sat', 'Legs B', '~55m'], ['Min·Sun', 'Rest', '']]
+        .map((r, i, a) => `<div class="srow"${i === a.length - 1 ? ' style="border-bottom:none"' : ''}><span style="font-size:13px;font-weight:600;color:var(--muted-2);width:64px;flex:none;padding-right:10px">${r[0]}</span><span style="font-size:14px;font-weight:600;flex:1;${!r[2] ? 'color:var(--muted)' : ''}">${r[1]}</span>${r[2] ? `<span style="font-size:12px;color:var(--muted-2)">${r[2]}</span>` : ''}</div>`).join('');
+      const overlay = state.iGen ? `<div style="position:absolute;inset:0;background:#0a0a0b;z-index:20;display:flex;flex-direction:column">
+          <div class="topbar"><button class="icon-btn" data-action="i-reset">‹</button><span class="t">Rencana kamu · Your plan</span></div>
+          <div class="workout-scroll" style="flex:1;overflow-y:auto"><div class="pad" style="padding-top:0">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div class="ai-badge" style="width:30px;height:30px;font-size:11px">AI</div><span style="font-size:13px;font-weight:600;color:var(--indigo-3)">Coach built your plan · offline, zero cost</span></div>
+            <div style="font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.15;margin-bottom:4px">${p.phaseLabel} · 4 minggu</div>
+            <div style="font-size:13.5px;color:var(--muted-2);margin-bottom:16px">6-day Push / Pull / Legs · WHR ${bc.whr} jadi fokus. <span style="color:var(--dim)">Your generated plan.</span></div>
+            <div style="display:flex;gap:10px;margin-bottom:16px">
+              <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px"><div style="font-size:11px;color:var(--muted-2);font-weight:600">Kalori · kcal</div><div style="font-size:22px;font-weight:800;margin-top:4px">${p.kcal.toLocaleString()}</div></div>
+              <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px"><div style="font-size:11px;color:var(--muted-2);font-weight:600">Protein</div><div style="font-size:22px;font-weight:800;margin-top:4px;color:var(--orange)">${p.protein}<span style="font-size:13px;color:var(--muted-2)">g</span></div></div>
+              <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px"><div style="font-size:11px;color:var(--muted-2);font-weight:600">Trend</div><div style="font-size:22px;font-weight:800;margin-top:4px;color:var(--green)">${p.trend}</div><div style="font-size:10px;color:var(--muted-2)">kg/mgg</div></div>
+            </div>
+            <div class="section-label">TARGET HARIAN · DAILY TARGETS <span style="color:var(--dim);font-weight:600">— tiap angka ada alasannya</span></div>
+            <div class="group">
+              ${macroRow('Kalori · Calories', p.kcal.toLocaleString() + ' kcal', p.why.kcal, 'var(--green)')}
+              ${macroRow('Protein', p.protein + ' g', p.why.protein, 'var(--orange)')}
+              ${macroRow('Karbo · Carbs', p.carbs + ' g', p.why.carbs)}
+              ${macroRow('Lemak · Fat', p.fat + ' g', p.why.fat)}
+              ${macroRow('BMR', p.bmr.toLocaleString() + ' kcal', p.bmrWhy)}
+            </div>
+            <div class="section-label">JADWAL MINGGU · YOUR WEEK</div>
+            <div class="group">${split}</div>
+            ${HINT('Latihan malam → kafein stop 14:00, makan terbesar habis latihan, whey pagi. · Night-training timing baked in.')}
+            ${HINT('Beban awal dari top set terakhirmu · starting weights seeded from your logged history. Review mingguan mengkalibrasi ulang.')}
+            <button class="btn btn-primary" data-action="ob-start" style="margin:6px 0 10px">Mulai Push A · Start →</button>
+            <button data-action="i-reset" style="width:100%;background:transparent;border:none;color:var(--indigo-3);font-size:15px;font-weight:700;padding:8px;cursor:pointer">Ubah lagi · Adjust</button>
+          </div></div>
         </div>` : '';
       return `<div class="route">
         ${obProgress(3)}
@@ -1005,7 +1029,40 @@ import { evaluateProgression } from './progression.js';
       thighLCm: v.thighL, thighRCm: v.thighR, calfLCm: v.calfL, calfRCm: v.calfR,
     };
   }
+  /* Embedded, deterministic plan-generation engine (E3). No external API. */
+  function computePlan() {
+    const v = state.iVals;
+    const w = Number(v.weight) || 70;
+    const bf = Number(v.bodyfat);
+    const lbm = Number(v.lbm) || (bf ? Math.round(w * (1 - bf / 100) * 10) / 10 : 0);
+    // BMR: Katch-McArdle from lean mass (uses the body-comp we collected);
+    // else Mifflin-St Jeor with a labelled height/age estimate.
+    let bmr, bmrWhy;
+    if (lbm) { bmr = Math.round(370 + 21.6 * lbm); bmrWhy = `Katch-McArdle · LBM ${fmtKg(lbm)} kg`; }
+    else { bmr = Math.round(10 * w + 6.25 * 172 - 5 * 28 + 5); bmrWhy = 'Mifflin-St Jeor · height/age estimated'; }
+    const activity = ({ 3: 1.35, 4: 1.42, 5: 1.48, 6: 1.53 })[state.obFreq] || 1.5;
+    const tdee = Math.round(bmr * activity);
+    const goal = state.obGoal;
+    const adj = goal === 'cut' ? -400 : goal === 'bulk' ? 250 : 0;
+    const kcal = Math.max(1400, Math.floor((tdee + adj) / 50) * 50);
+    const gPerKg = goal === 'cut' ? 2.25 : goal === 'bulk' ? 2.0 : 2.2;
+    const protein = Math.round(gPerKg * w / 5) * 5;
+    const fat = Math.round(0.25 * kcal / 9 / 5) * 5;
+    const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+    const phaseLabel = GOALS.find((g) => g[0] === goal)[1];
+    const trend = goal === 'cut' ? '−0.5' : goal === 'bulk' ? '+0.25' : '0.0';
+    return {
+      bmr, bmrWhy, activity, tdee, kcal, protein, carbs, fat, trend, phaseLabel, goal,
+      why: {
+        kcal: goal === 'cut' ? `TDEE ${tdee.toLocaleString()} − 400 · defisit ~0.5 kg/mgg` : goal === 'bulk' ? `TDEE ${tdee.toLocaleString()} + 250 · surplus pelan` : `= TDEE ${tdee.toLocaleString()} · maintenance`,
+        protein: `${gPerKg} g/kg × ${fmtKg(w)} kg — jaga otot · protect muscle`,
+        fat: '25% kalori — hormon & kenyang',
+        carbs: 'sisa energi buat latihan · fuel',
+      },
+    };
+  }
   function generatePlan() {
+    state.plan = computePlan();
     state.iGen = true; state.iEdit = null;
     if (BE.on) BE.api.saveBody(bodyFromIVals()).catch(() => {});
     render();
@@ -1078,7 +1135,14 @@ import { evaluateProgression } from './progression.js';
     'toast': (a) => showToast(a),
     'ob-goal': (a) => { state.obGoal = a; render(); },
     'ob-next': () => { state.obStep = Math.min(3, state.obStep + 1); render(); $('#view').scrollTop = 0; },
-    'ob-start': () => { finishOnboarding(); state.iGen = false; state.tab = 'workout'; render(); },
+    'ob-start': () => {
+      finishOnboarding();
+      if (state.plan) { // apply generated targets to the whole app
+        state.kcalTarget = state.plan.kcal; state.proteinTarget = state.plan.protein;
+        if (BE.on) BE.api.setSetting('targets', { kcal: state.plan.kcal, protein: state.plan.protein, carbs: state.plan.carbs, fat: state.plan.fat }).catch(() => {});
+      }
+      state.iGen = false; state.tab = 'workout'; render();
+    },
     'skip-onboarding': () => { finishOnboarding(); state.tab = 'today'; render(); },
     'replay-onboarding': () => { state.obStep = 0; state.iGen = false; state.tab = 'onboarding'; render(); $('#view').scrollTop = 0; },
     'nav-measure': () => { state.iReturn = 'body'; state.iGen = false; state.tab = 'measure'; render(); $('#view').scrollTop = 0; },
