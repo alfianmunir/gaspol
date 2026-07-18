@@ -1,5 +1,6 @@
 # Local environment values (never commit)
-config.js
+# NOTE: config.js is committed on purpose — it holds only the public
+# anon/publishable key (RLS-protected), never the service-role key.
 .env
 supabase/.env
 

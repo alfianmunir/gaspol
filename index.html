@@ -28,9 +28,9 @@
     </div>
   </div>
 
-  <!-- To enable the Supabase backend: create config.js from config.example.js
-       and uncomment the next line (loads before the app sets window.GASPOL_CONFIG). -->
-  <!-- <script src="./config.js"></script> -->
+  <!-- Supabase backend config (public anon key; RLS is the real guard).
+       Loads before app.js so the app boots against Supabase, not seed data. -->
+  <script src="./config.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
