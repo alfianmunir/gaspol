@@ -1146,8 +1146,9 @@ import { evaluateProgression } from './progression.js';
     state.qMsgs.push({ role: 'user', text: t }); state.qInput = ''; state.qTyping = true;
     render();
     setTimeout(() => {
-      state.qMsgs.push(answerFor(t)); state.qTyping = false; render();
-      if (BE.on) BE.api.consult(t).catch(() => {});
+      const ans = answerFor(t);
+      state.qMsgs.push(ans); state.qTyping = false; render();
+      if (BE.on) BE.api.consult(t, ans.text).catch(() => {});
     }, 700);
   }
   function answerFor(t) {
@@ -1317,6 +1318,16 @@ import { evaluateProgression } from './progression.js';
       energy: x.energy || 3, soreness: x.soreness || 2,
     }));
   }
+  async function hydrateConsult() {
+    const log = await BE.api.getConsultLog();
+    if (!log || !log.length) return; // fresh install → start with an empty thread
+    const msgs = [];
+    for (const e of log) {
+      if (e.q) msgs.push({ role: 'user', text: e.q });
+      if (e.a) msgs.push({ role: 'coach', text: e.a });
+    }
+    if (msgs.length) state.qMsgs = msgs;
+  }
   async function hydrateReminders() {
     const r = await BE.api.getReminders();
     if (r && Object.keys(r).length) state.reminders = { ...state.reminders, ...r };
@@ -1352,7 +1363,7 @@ import { evaluateProgression } from './progression.js';
         // Hydrate every read-driven tab; each is best-effort so one failure
         // (or an empty table) leaves that tab on its seed values.
         await settle(hydrateSession());
-        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateScan()), settle(hydrateCheckin()), settle(hydrateCheckinHistory()), settle(hydrateReminders()), settle(hydrateReview()), settle(hydrateProfile())]);
+        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateScan()), settle(hydrateCheckin()), settle(hydrateCheckinHistory()), settle(hydrateConsult()), settle(hydrateReminders()), settle(hydrateReview()), settle(hydrateProfile())]);
       } catch (e) { console.warn('[Gaspol] backend unavailable — running on seed data.', e); BE.on = false; }
     }
     render();

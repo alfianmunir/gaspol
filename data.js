@@ -286,10 +286,22 @@ export const GaspolData = {
 
   /**
    * Consult (E7). The answer is produced by the embedded, rule-based intent
-   * engine in the client (PRD locked decision: no external API). This hook is
-   * a place to log the question for future coach context — no-op by default.
+   * engine in the client (PRD locked decision: no external API). We persist the
+   * Q&A to fit_settings.consult_log (capped) so the thread survives reloads and
+   * builds future coach context. Kept out of fit_coach_notes on purpose so a
+   * consult entry never shadows the weekly review in getLatestReview().
    */
-  async consult(_question) { return null; },
+  async consult(question, answer = null) {
+    if (!question) return null;
+    const s = await this.getSettings();
+    const log = Array.isArray(s.consult_log) ? s.consult_log : [];
+    log.push({ q: question, a: answer, ts: Date.now() });
+    const capped = log.slice(-30);
+    await this.setSetting('consult_log', capped);
+    return capped;
+  },
+  /** Persisted consult thread (E7), oldest→newest. */
+  async getConsultLog() { return (await this.getSettings()).consult_log || []; },
 
   /* Preview an adjustment in the UI without a round-trip. */
   previewCalorieAdjust: adjustCalories,
