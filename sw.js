@@ -1,11 +1,12 @@
 /* Gaspol service worker — offline-first shell cache (PRD §8: works in a basement gym). */
-const CACHE = 'gaspol-v5';
+const CACHE = 'gaspol-v6';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './config.js',
+  './foodvision.js',
   './manifest.webmanifest',
   './icon.svg',
 ];
@@ -28,7 +29,13 @@ self.addEventListener('fetch', (e) => {
     caches.match(e.request).then((cached) => {
       const network = fetch(e.request)
         .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
+          // Cache same-origin assets, plus the on-device food-vision model
+          // (TF.js / MobileNet from esm.sh, served with CORS) so it works
+          // offline after the first classification.
+          const host = new URL(e.request.url).host;
+          const cacheable = res && res.status === 200 &&
+            (res.type === 'basic' || (res.type === 'cors' && /(^|\.)esm\.sh$/.test(host)));
+          if (cacheable) {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put(e.request, copy));
           }

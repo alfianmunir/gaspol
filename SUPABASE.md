@@ -20,58 +20,58 @@ here — the base schema now lives in git at `migrations/20260703000000_fit_base
   `fit-weekly-review` (verify_jwt=false; fails closed with 403 until `CRON_SECRET`
   is set, so it is never an open endpoint).
 
-## ⏭ Remaining (manual — needs your keys / decisions)
+- **Frontend wired** — `config.js` (committed; public anon key) points the app at
+  this project and `requireAuth: true`. On boot `app.js` lazy-loads `data.js`,
+  calls `GaspolData.init()`, and hydrates every read-driven tab (best-effort —
+  an empty table falls back to seed): `hydrateSession / hydrateFood / hydrateBody /
+  hydrateScan / hydrateCheckin / hydrateCheckinHistory / hydrateConsult /
+  hydrateReminders / hydrateReview / hydrateProfile`.
+- **Auth + per-user RLS ENFORCED** — Email/Google sign-in gate is live;
+  `migrations/20260716120100_fit_rls_enforce.sql` has been applied. Every `fit_*`
+  row is owned by the signed-in account and readable only by that `authenticated`
+  user (the open `anon` policies are gone). `fit_foods` NULL rows remain the shared
+  library. `fit-weekly-review` writes with the service-role key (bypasses RLS), so
+  the Sunday review keeps working.
+- **Weekly-review cron SCHEDULED** — `pg_cron` + `pg_net` enabled; Vault holds
+  `project_url` + a generated `cron_secret`; job `gaspol-weekly-review` runs
+  `0 12 * * 0` (Sun 19:00 WIB). See `supabase/schedules.sql`.
 
-1. **Set function secrets** (both functions need these to actually run):
+## ⏭ Remaining (manual — dashboard only)
+
+**Set the Edge-Function secrets.** These are function environment variables — they
+can only be set in the dashboard (Edge Functions → Secrets) or via the CLI, not
+through the DB/MCP.
+
+1. **`CRON_SECRET`** — required for the Sunday review to run. It must EXACTLY match
+   the `cron_secret` already generated in Vault. Reveal that value (Dashboard → SQL
+   Editor), then paste it into the function secret:
+   ```sql
+   select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret';
+   ```
+   Edge Functions → Secrets → add `CRON_SECRET = <that value>`. Until it's set,
+   `fit-weekly-review` returns 403 to everyone (fail-closed) and the cron no-ops.
+
+2. **`ANTHROPIC_API_KEY`** — *optional*. Only used to word the weekly-review note
+   with Claude; without it the review still posts a solid deterministic note. NOT
+   needed for food photos — those now run **on-device** (`foodvision.js`, no key).
+   The `fit-food-estimate` function is only used if you wire the optional cloud path.
+
    ```bash
+   # CLI equivalent, if you prefer:
    supabase link --project-ref kxhalnjrcayzsbclfeaz
-   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...  CRON_SECRET=$(openssl rand -hex 24)
-   ```
-   Until `ANTHROPIC_API_KEY` is set the functions return 500 at the Claude call;
-   until `CRON_SECRET` is set `fit-weekly-review` returns 403 to everyone.
-
-2. **Schedule the Sunday review** (Dashboard → SQL editor): enable `pg_cron` +
-   `pg_net`, store the Vault secrets, then run `supabase/schedules.sql`
-   (Sundays 19:00 WIB). Test by hand once secrets are set:
-   ```bash
-   curl -X POST "https://ticdiatbdxkmpzmqvntn.supabase.co/functions/v1/fit-weekly-review" \
-     -H "x-cron-secret: $CRON_SECRET"
+   supabase secrets set CRON_SECRET=<vault value>  ANTHROPIC_API_KEY=sk-ant-...
    ```
 
-3. **Point the frontend at the backend** (on Vercel). The app reads the backend
-   only when `window.GASPOL_CONFIG` is set. Create `config.js` (gitignored) next to
-   `index.html` and uncomment its `<script>` tag in `index.html`:
-   ```js
-   window.GASPOL_CONFIG = {
-     url: "https://ticdiatbdxkmpzmqvntn.supabase.co",
-     anonKey: "sb_publishable_…"   // publishable key from the dashboard (public by design)
-   };
-   ```
-   On boot `app.js` lazy-loads `data.js`, calls `GaspolData.init()`, and hydrates
-   every read-driven tab (best-effort — an empty table falls back to seed):
-   `hydrateSession / hydrateFood / hydrateBody / hydrateScan / hydrateCheckin /
-   hydrateCheckinHistory / hydrateConsult / hydrateReminders / hydrateReview /
-   hydrateProfile`.
-
-4. **Turn on auth + per-user RLS — when you're ready.** The sign-in gate and the
-   enforce migration are both built and waiting behind one flag. Runbook:
-
-   1. **Supabase → Authentication → Providers:** enable **Email** (magic link) and/or
-      **Google** (paste OAuth client id/secret; add your Vercel URL to redirect URLs).
-   2. **Add redirect URLs** (Authentication → URL Configuration): your Vercel origin
-      (e.g. `https://gaspol.vercel.app`) and `http://localhost:*` for local testing.
-   3. **`config.js` → `requireAuth: true`**, redeploy. The app now shows the sign-in
-      gate; sign in once with your account (this creates your `auth.users` row).
-   4. **Apply** `migrations/20260716120100_fit_rls_enforce.sql` (self-contained:
-      auto-detects your uid, backfills every pre-auth `fit_*` row to you — `fit_foods`
-      NULLs stay the shared library — then swaps the open policies for per-user owner
-      policies scoped to `authenticated`). Idempotent; safe to re-run.
-   5. Reload — your data is now private to your account.
-
-   Order matters: do **3 before 4**, or step 4 aborts with "No auth user found"
-   (the FK on `fit_*.user_id → auth.users` means the backfill needs a real uid).
-   The `fit-weekly-review` Edge Function writes with the service-role key, which
-   bypasses RLS, so the Sunday review keeps working after enforcement.
+**Test the review without waiting for Sunday** (Dashboard → SQL Editor):
+```sql
+select net.http_post(
+  url     := 'https://kxhalnjrcayzsbclfeaz.supabase.co/functions/v1/fit-weekly-review',
+  headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',
+               (select decrypted_secret from vault.decrypted_secrets where name='cron_secret')),
+  body    := '{}'::jsonb
+);
+-- then: select * from fit_coach_notes order by created_at desc limit 1;
+```
 
 ## Frontend write paths (already wired)
 
@@ -80,7 +80,7 @@ here — the base schema now lives in git at `migrations/20260703000000_fit_base
 | log a set | `logSet({exerciseId,setNumber,weight,reps})` (queues offline) |
 | finish session | `applyProgression(exercise, recentSessions)` |
 | quick-add / log meal | `logFood({...})` |
-| snap a meal | `estimateFoodPhoto(file)` → `logFood(...)` |
+| snap a meal | on-device `foodvision.estimate()` (no API) → `logFood(...)` |
 | weigh-in | `logWeighIn({weightKg,...})` |
 | save check-in | `saveCheckin({sleepHours,energy,soreness})` |
 | toggle a reminder | `setReminder(key, on)` |
