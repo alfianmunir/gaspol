@@ -103,6 +103,22 @@ export const GaspolData = {
     return row;
   },
 
+  /** Edit a previously-logged set (E4). */
+  async editSet({ exerciseId, setNumber, weight, reps, rpe = null, logDate = today() }) {
+    const q = table('fit_set_logs').update({ weight, reps, rpe })
+      .eq('exercise_id', exerciseId).eq('set_number', setNumber).eq('log_date', logDate).select();
+    const { data, error } = await scopeWrite(q);
+    if (error) throw error;
+    return data;
+  },
+  /** Delete a logged set (E4). */
+  async deleteSet({ exerciseId, setNumber, logDate = today() }) {
+    const q = table('fit_set_logs').delete()
+      .eq('exercise_id', exerciseId).eq('set_number', setNumber).eq('log_date', logDate);
+    const { error } = await scopeWrite(q);
+    if (error) throw error;
+  },
+
   /** Apply progression for one exercise after its last set and persist. */
   async applyProgression(exercise, recentSessions) {
     const result = evaluateProgression(exercise, recentSessions);
@@ -165,6 +181,23 @@ export const GaspolData = {
     if (error) throw error;
     return data;
   },
+  /** Full 14+ measurement entry (E6). Writes the extended fit_body_metrics columns. */
+  async saveBody(m, logDate = today()) {
+    const whr = (m.waistCm && m.hipCm) ? Math.round(m.waistCm / m.hipCm * 100) / 100 : null;
+    const row = {
+      log_date: logDate, user_id: uid, source: 'app',
+      weight_kg: m.weightKg ?? null, waist_cm: m.waistCm ?? null, hip_cm: m.hipCm ?? null,
+      bf_pct: m.bfPct ?? null, lean_body_mass_kg: m.muscleKg ?? null,
+      neck_cm: m.neckCm ?? null, shoulder_cm: m.shoulderCm ?? null, chest_cm: m.chestCm ?? null, abdomen_cm: m.abdomenCm ?? null,
+      biceps_l_cm: m.bicepsLCm ?? null, biceps_r_cm: m.bicepsRCm ?? null,
+      forearm_l_cm: m.forearmLCm ?? null, forearm_r_cm: m.forearmRCm ?? null,
+      thigh_l_cm: m.thighLCm ?? null, thigh_r_cm: m.thighRCm ?? null,
+      calf_l_cm: m.calfLCm ?? null, calf_r_cm: m.calfRCm ?? null, whr,
+    };
+    const { data, error } = await table('fit_body_metrics').upsert(row, { onConflict: 'user_id,log_date' }).select().single();
+    if (error) throw error;
+    return data;
+  },
 
   /* ---------- Daily check-in (F7) ------------------------- */
   async getCheckin(logDate = today()) {
@@ -213,6 +246,13 @@ export const GaspolData = {
     const d = n.data || {};
     return { title: n.title, body: n.body, date: n.note_date, stats: d.stats || null, changes: d.changes || [] };
   },
+
+  /**
+   * Consult (E7). The answer is produced by the embedded, rule-based intent
+   * engine in the client (PRD locked decision: no external API). This hook is
+   * a place to log the question for future coach context — no-op by default.
+   */
+  async consult(_question) { return null; },
 
   /* Preview an adjustment in the UI without a round-trip. */
   previewCalorieAdjust: adjustCalories,
