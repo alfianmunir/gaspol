@@ -16,5 +16,5 @@ window.GASPOL_CONFIG = {
   //   2. applied migrations/20260716120100_fit_rls_enforce.sql.
   // When true, the app shows a sign-in gate and scopes all data per user.
   // While false, it runs the open single-user prototype (anon key).
-  requireAuth: false,
+  requireAuth: true,
 };
