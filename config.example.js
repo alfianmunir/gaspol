@@ -10,7 +10,7 @@
  * config.js is gitignored so you never commit environment values.
  */
 window.GASPOL_CONFIG = {
-  url: "https://ticdiatbdxkmpzmqvntn.supabase.co",
+  url: "https://kxhalnjrcayzsbclfeaz.supabase.co",
   anonKey: "YOUR_SUPABASE_ANON_PUBLISHABLE_KEY",
 
   // Set true after enabling auth + applying the fit_rls_enforce migration.
