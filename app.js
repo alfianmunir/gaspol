@@ -100,6 +100,22 @@ import { evaluateProgression } from './progression.js';
     ['WHR vs target?', 'WHR vs target?'], ['Kapan stop kafein?', 'Kapan stop kafein?'],
   ];
 
+  // Imported InBody segmental scan — 25 Apr FitScan (PRD E9), real fit_body_metrics.scan shape.
+  const SCAN_SEED = {
+    date: '25 Apr', bmi: 24.4, bmr: 1631, visceral: 5, bodyAge: 26, musclePct: 81.7, fatPct: 13.6, whr: 0.94,
+    segments: {
+      arm_l: { m: 3.3, f: 0.6 }, arm_r: { m: 3.4, f: 0.6 }, torso: { m: 26.2, f: 5.1 },
+      leg_l: { m: 9.3, f: 1.6 }, leg_r: { m: 9.2, f: 1.6 },
+    },
+  };
+  // 7-day check-in history (E8). Recent 2 days: poor sleep + high soreness → deload nudge.
+  const CHECKIN_HISTORY = () => [
+    { sleep: 7.4, energy: 4, soreness: 2 }, { sleep: 7.1, energy: 4, soreness: 2 },
+    { sleep: 6.9, energy: 3, soreness: 3 }, { sleep: 7.2, energy: 4, soreness: 2 },
+    { sleep: 7.0, energy: 3, soreness: 3 }, { sleep: 6.3, energy: 2, soreness: 4 },
+    { sleep: 6.4, energy: 2, soreness: 4 },
+  ];
+
   /* ---------- App state -------------------------------------- */
   const state = {
     tab: 'today',
@@ -125,9 +141,11 @@ import { evaluateProgression } from './progression.js';
     portionIdx: 2,
     photoView: 'front', photoCompare: 50,
     body: { weightKg: 74.2, weekChange: -1.2, waist: 82, hip: 96, bf: 16, trend: BODY_TREND.slice() },
+    scan: { ...SCAN_SEED },       // imported segmental scan (E6)
     review: null,                 // hydrated from the latest coach note; falls back to SEED_REVIEW
     profile: { name: 'Munir Sama', email: 'munir@email.com', joined: 'joined May 2026', premium: true },
     checkin: { sleep: 6.9, energy: 4, soreness: 4 },
+    checkinHistory: CHECKIN_HISTORY(),   // 7-day recovery history (E8)
     reminders: {
       sessionStart: true, weighIn: true, weeklyReview: true,
       preworkout: true, caffeine: false, weeklyPhoto: true, streakRepair: false, whatsapp: false,
@@ -202,6 +220,7 @@ import { evaluateProgression } from './progression.js';
         <p>Bench cleared its top set two weeks running — I moved <b>Thursday to 64&nbsp;kg</b>. You're <b>1.2&nbsp;kg down</b> this week, right on trend. Hit your protein floor today: <b>155&nbsp;g</b>.</p>
         <div class="coach-link" data-action="nav-consult">Tanya coach · Ask your coach →</div>
       </div>
+      ${recoveryStatus().deload ? recoveryCard() : ''}
       <div class="card" style="margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
           <span class="section-label" style="margin:0">TODAY'S SESSION</span>
@@ -459,6 +478,7 @@ import { evaluateProgression } from './progression.js';
           ${trendSvg(b.trend)}
           <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:6px"><span>${b.trend.length} days ago</span><span>today</span></div>
         </div>
+        ${scanCard()}
         <div style="display:flex;gap:12px;margin-bottom:14px">
           <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Waist / Hip</div><div style="font-size:20px;font-weight:800;margin-top:5px">${fmtKg(b.waist)} / ${fmtKg(b.hip)}</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">WHR <b style="color:var(--text-2)">${whr}</b></div></div>
           <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Body fat</div><div style="font-size:20px;font-weight:800;margin-top:5px">≈ ${fmtKg(b.bf)}<span style="font-size:13px;color:var(--muted-2)">%</span></div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">scale estimate</div></div></div>
@@ -486,6 +506,56 @@ import { evaluateProgression } from './progression.js';
         <div style="flex:none;width:8px;height:8px;border-radius:2px;background:${c};margin-top:5px"></div>
         <div><div style="font-size:13px;font-weight:700">${t}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${d}</div></div></div>`).join('')}
     </div>`;
+  }
+
+  /* Imported segmental scan display (E6/US6.2). */
+  function scanCard() {
+    const sc = state.scan; const seg = sc.segments;
+    const maxM = Math.max(...Object.values(seg).map((s) => s.m));
+    const segRow = (name, L, Rr) => {
+      const cells = [L, Rr].filter(Boolean).map((s, i) => {
+        const w = Math.round(s.m / maxM * 100);
+        const side = Rr ? (i === 0 ? 'L · ' : 'R · ') : '';
+        return `<div style="flex:1"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span style="color:var(--muted-2)">${side}${name}</span><span style="font-weight:700">${fmtKg(s.m)}<span style="color:var(--muted-2);font-size:9px"> kg</span></span></div>
+          <div style="height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden"><div style="height:100%;width:${w}%;background:linear-gradient(90deg,#30d158,#8f8bff)"></div></div>
+          <div style="font-size:9.5px;color:var(--dim);margin-top:2px">fat ${fmtKg(s.f)} kg</div></div>`;
+      }).join('');
+      return `<div style="display:flex;gap:14px;margin-bottom:12px">${cells}</div>`;
+    };
+    const mini = (k, val, u) => `<div style="flex:1"><div style="font-size:10px;color:var(--muted-2);font-weight:600">${k}</div><div style="font-size:16px;font-weight:800;margin-top:2px">${val}<span style="font-size:10px;color:var(--muted-2)">${u || ''}</span></div></div>`;
+    return `<div class="card" style="border-radius:20px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Segmental scan · InBody ${sc.date}</div><span style="font-size:10px;font-weight:700;color:var(--indigo-3);background:rgba(94,92,230,.16);border:1px solid rgba(94,92,230,.3);padding:3px 8px;border-radius:999px">Body age ${sc.bodyAge}</span></div>
+      <div style="display:flex;gap:10px;margin-bottom:16px">${mini('BMI', sc.bmi)}${mini('BMR', sc.bmr, ' kcal')}${mini('Visceral', sc.visceral)}${mini('Otot · Muscle', sc.musclePct, '%')}</div>
+      <div style="font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--dim);margin-bottom:10px">OTOT PER BAGIAN · MUSCLE BY SEGMENT</div>
+      ${segRow('Lengan · Arm', seg.arm_l, seg.arm_r)}
+      ${segRow('Kaki · Leg', seg.leg_l, seg.leg_r)}
+      ${segRow('Torso', seg.torso, null)}
+    </div>`;
+  }
+
+  /* Recovery from sleep + soreness history (E8). */
+  function recoveryStatus() {
+    const h = state.checkinHistory || [];
+    const last7 = h.slice(-7);
+    const avgSleep = last7.length ? last7.reduce((a, x) => a + x.sleep, 0) / last7.length : 0;
+    const poor = h.slice(-2).filter((x) => x.sleep < 7 && x.soreness >= 4).length;
+    return { avgSleep: Math.round(avgSleep * 10) / 10, deload: poor >= 2, poor, last7 };
+  }
+  function sleepSpark(days) {
+    return `<div style="display:flex;align-items:flex-end;gap:6px;height:64px">${days.map((d) => {
+      const h = Math.max(8, Math.min(64, (d.sleep - 3.5) / 5 * 64));
+      const c = d.sleep >= 7 ? 'var(--green)' : 'var(--orange)';
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:100%;height:${Math.round(h)}px;border-radius:5px 5px 3px 3px;background:${c};opacity:.9"></div><span style="font-size:9px;color:var(--dim)">${d.sleep.toFixed(1)}</span></div>`;
+    }).join('')}</div>`;
+  }
+  function recoveryCard() {
+    const r = recoveryStatus();
+    if (r.deload) return `<div style="display:flex;align-items:flex-start;gap:11px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:16px;padding:13px;margin-bottom:14px">
+        <div style="flex:none;width:26px;height:26px;border-radius:8px;background:rgba(255,159,10,.2);display:flex;align-items:center;justify-content:center;color:var(--orange);font-size:14px;font-weight:800">!</div>
+        <div><div style="font-size:13px;font-weight:700;color:#ffcf7a">Recovery rendah · pull back</div><div style="font-size:12px;color:var(--muted);margin-top:2px;line-height:1.4">Tidur ${r.avgSleep} jam &amp; soreness tinggi 2 hari — Coach kurangi volume Kamis ~20%. · Reduce Thursday's volume.</div></div></div>`;
+    return `<div style="display:flex;align-items:center;gap:11px;background:rgba(48,209,88,.08);border:1px solid rgba(48,209,88,.25);border-radius:16px;padding:13px;margin-bottom:14px">
+        <div style="flex:none;width:26px;height:26px;border-radius:8px;background:rgba(48,209,88,.2);display:flex;align-items:center;justify-content:center;color:var(--green);font-size:14px;font-weight:800">✓</div>
+        <div><div style="font-size:13px;font-weight:700;color:#7ee59b">Recovery oke · good to go</div><div style="font-size:12px;color:var(--muted);margin-top:2px">Tidur ${r.avgSleep} jam rata-rata — lanjut sesuai rencana. · On plan.</div></div></div>`;
   }
 
   function screenPhotos() {
@@ -527,17 +597,19 @@ import { evaluateProgression } from './progression.js';
     const sleepPct = Math.round(ci.sleep / 10 * 100);
     return `<div class="route">
       <div class="topbar"><button class="icon-btn" data-action="nav:today">✕</button><span class="grow t" style="text-align:center">Morning check-in</span><span style="width:34px"></span></div>
-      <div style="flex:1;display:flex;flex-direction:column;padding:16px 24px 22px">
-        <div style="font-size:13px;color:var(--muted-2);margin-bottom:26px">Ten seconds. It tunes today's plan.</div>
+      <div class="workout-scroll" style="flex:1;overflow-y:auto"><div style="display:flex;flex-direction:column;padding:8px 24px 22px">
+        <div style="font-size:13px;color:var(--muted-2);margin-bottom:18px">Ten seconds. It tunes today's plan.</div>
+        ${recoveryCard()}
+        <div style="margin-bottom:22px"><div style="font-size:12px;font-weight:700;color:var(--muted-2);letter-spacing:.3px;margin-bottom:10px">TIDUR 7 HARI · SLEEP · LAST 7 DAYS</div>${sleepSpark(recoveryStatus().last7)}</div>
         <div style="margin-bottom:26px">
           <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px"><span style="font-size:16px;font-weight:600">Sleep</span><span style="font-size:20px;font-weight:800">${ci.sleep.toFixed(1)}<span style="font-size:13px;color:var(--muted-2)">h</span></span></div>
           <div style="height:8px;border-radius:999px;background:rgba(255,255,255,.08);position:relative"><div style="width:${sleepPct}%;height:100%;border-radius:999px;background:var(--indigo)"></div><div style="position:absolute;top:50%;left:${sleepPct}%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5)"></div></div></div>
         <div style="margin-bottom:24px"><div style="font-size:16px;font-weight:600;margin-bottom:12px">Energy</div>${rating('energy', ci.energy, 'var(--green)', 'var(--green-ink)')}</div>
         <div style="margin-bottom:24px"><div style="font-size:16px;font-weight:600;margin-bottom:12px">Soreness</div>${rating('soreness', ci.soreness, 'var(--orange)', '#2a1800')}</div>
         ${HINT(`Soreness at ${ci.soreness} ${ci.soreness >= 4 ? 'two days running — I may pull back Thursday&rsquo;s volume.' : '— recovery looks fine for Thursday.'}`)}
-        <div style="flex:1"></div>
+        <div style="height:14px"></div>
         <button class="btn btn-primary" data-action="save-checkin" style="padding:17px">Save check-in</button>
-      </div></div>`;
+      </div></div></div>`;
   }
 
   /* =========================================================
@@ -1086,7 +1158,7 @@ import { evaluateProgression } from './progression.js';
     if (m('beban', 'berikut', 'next', 'weight', 'naik')) return { role: 'coach', text: 'Sesi berikut — Bench naik ke 66.5 kg kalau semua set kena top range. OHP tetap 40 kg. · Bench goes up.' };
     if (m('whr', 'waist', 'pinggang')) return { role: 'coach', text: `WHR kamu ${(state.iVals.waist / state.iVals.hip).toFixed(2)} vs target <0.90. Masih di atas target — tahan cut, tambah kerja core. · Hold the cut.` };
     if (m('kafein', 'caffeine', 'kopi')) return { role: 'coach', text: 'Latihan jam 18:00 → stop kafein jam 14:00 biar tidur nggak keganggu. · Cut caffeine by 2 pm.' };
-    if (m('tidur', 'sleep', 'recovery', 'pulih')) return { role: 'coach', text: `Tidur rata-rata ${state.checkin.sleep.toFixed(1)} jam minggu ini, sedikit di bawah target 7.5. Recovery cukup buat Push A, tapi tidur lebih awal. · Sleep a bit more.` };
+    if (m('tidur', 'sleep', 'recovery', 'pulih')) { const r = recoveryStatus(); return { role: 'coach', text: r.deload ? `Tidur rata-rata ${r.avgSleep} jam &amp; soreness tinggi 2 hari terakhir — Coach kurangi volume Kamis ~20% biar pulih. · Pull back Thursday.` : `Tidur rata-rata ${r.avgSleep} jam minggu ini. Recovery cukup buat lanjut sesuai rencana — tetap tidur lebih awal ya. · On plan.` }; }
     if (m('ukur', 'measure', 'lengan', 'dada', 'measurement')) return { role: 'coach', text: 'Ukuran terakhir: pinggang 88 cm (−1 sejak Apr), lengan 35 cm, dada 97 cm. Ukur lagi tiap Minggu. · Re-measure weekly.' };
     if (m('fase', 'phase', 'cut', 'bulk', 'defisit', 'deficit')) return { role: 'coach', text: 'Fase sekarang: Cut, minggu 3 dari 4. Defisit ~400 kcal/hari. Perkiraan selesai ~1 minggu lagi lalu maintenance. · You are cutting.' };
     return { role: 'coach', text: 'Aku jawab dari data & rencanamu — coba tanya soal latihan hari ini, target makro, progres, recovery, atau WHR. · Ask about your plan or data.' };
@@ -1127,7 +1199,9 @@ import { evaluateProgression } from './progression.js';
     'photoview': (a) => { state.photoView = a; render(); },
     'rate': (a) => { const [kind, n] = a.split(':'); state.checkin[kind] = Number(n); render(); },
     'save-checkin': () => {
-      if (BE.on) BE.api.saveCheckin({ sleepHours: state.checkin.sleep, energy: state.checkin.energy, soreness: state.checkin.soreness }).catch(() => {});
+      const c = { sleep: state.checkin.sleep, energy: state.checkin.energy, soreness: state.checkin.soreness };
+      state.checkinHistory = [...state.checkinHistory.slice(-6), c]; // keep a rolling 7-day window (E8)
+      if (BE.on) BE.api.saveCheckin({ sleepHours: c.sleep, energy: c.energy, soreness: c.soreness }).catch(() => {});
       state.tab = 'today'; render(); showToast('Check-in saved · thanks, Munir');
     },
     'toggle': (a) => { state.reminders[a] = !state.reminders[a]; if (BE.on) BE.api.setReminder(a, state.reminders[a]).catch(() => {}); render(); },
