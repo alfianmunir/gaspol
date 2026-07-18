@@ -8,8 +8,8 @@
  * Values: get_project_url → url, get_publishable_keys → anonKey.
  */
 window.GASPOL_CONFIG = {
-  url: "https://ticdiatbdxkmpzmqvntn.supabase.co",
-  anonKey: "sb_publishable_NfeCBD9tGXW8z6uuEfMtLg_HZG0wx2_",
+  url: "https://kxhalnjrcayzsbclfeaz.supabase.co",
+  anonKey: "sb_publishable_toCWnsGu-lntkw_T_G1G6w_Y97ZhxBt",
 
   // Flip to true ONLY after you have:
   //   1. enabled an auth provider (Google/Email) in Supabase, and

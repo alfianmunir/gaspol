@@ -1,17 +1,21 @@
 # Supabase backend — status & remaining steps
 
-Backend for Gaspol on the existing project (`ticdiatbdxkmpzmqvntn`, region
-`ap-southeast-1`). See [BACKEND.md](./BACKEND.md) for *why* Supabase. That project
-is **shared** with "No Bites Left" — everything here only touches `fit_*` tables,
-a new `fit-photos` bucket, and `fit-*` functions.
+Backend for Gaspol on its **dedicated** project (`kxhalnjrcayzsbclfeaz`, name
+`gaspol`, region `ap-southeast-2`). See [BACKEND.md](./BACKEND.md) for *why*
+Supabase. The whole database belongs to Gaspol; tables keep the `fit_*` prefix
+for continuity. (The app was first prototyped on a shared project and migrated
+here — the base schema now lives in git at `migrations/20260703000000_fit_base_schema.sql`.)
 
 ## ✅ Already applied to the live project
 
-- **Additive migration** (`migrations/20260716120000_fit_additive.sql`) — added
-  `user_id` columns (nullable), upsert indexes, `fit_coach_notes.data` (F8), the
-  `fit_photos` table, and the private `fit-photos` storage bucket. **Non-breaking:**
-  the prototype's open `fit anon all` policies are still in place, so existing data
-  (41 exercises, settings, etc.) stays visible.
+- **Base schema** (`migrations/20260703000000_fit_base_schema.sql`) — all nine
+  `fit_*` tables, upsert indexes, `fit_coach_notes.data` (F8), the `fit_photos`
+  table + private `fit-photos` storage bucket, open `fit anon all` prototype
+  policies, and role grants. Seeded with the program (41 exercises), the quick-add
+  food library (16), the imported body/scan rows (2), settings (3), and the welcome
+  coach note (1).
+- **Additive migration** (`migrations/20260716120000_fit_additive.sql`) is folded
+  into the base schema above (kept in the repo as history; idempotent if re-run).
 - **Edge functions deployed** (ACTIVE): `fit-food-estimate` (verify_jwt=true) and
   `fit-weekly-review` (verify_jwt=false; fails closed with 403 until `CRON_SECRET`
   is set, so it is never an open endpoint).
@@ -20,7 +24,7 @@ a new `fit-photos` bucket, and `fit-*` functions.
 
 1. **Set function secrets** (both functions need these to actually run):
    ```bash
-   supabase link --project-ref ticdiatbdxkmpzmqvntn
+   supabase link --project-ref kxhalnjrcayzsbclfeaz
    supabase secrets set ANTHROPIC_API_KEY=sk-ant-...  CRON_SECRET=$(openssl rand -hex 24)
    ```
    Until `ANTHROPIC_API_KEY` is set the functions return 500 at the Claude call;

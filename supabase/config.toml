@@ -1,6 +1,6 @@
 # Supabase CLI config for the Gaspol backend.
-# Link to the shared project:  supabase link --project-ref ticdiatbdxkmpzmqvntn
-project_id = "ticdiatbdxkmpzmqvntn"
+# Dedicated project:  supabase link --project-ref kxhalnjrcayzsbclfeaz
+project_id = "kxhalnjrcayzsbclfeaz"
 
 [functions.fit-food-estimate]
 # Signed-in users only; the function also checks the premium flag.
