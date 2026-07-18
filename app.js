@@ -9,6 +9,7 @@
    present, so the seed-data demo runs with no backend.
    ============================================================ */
 import { evaluateProgression } from './progression.js';
+import Vision from './foodvision.js';
 
 (() => {
   'use strict';
@@ -141,6 +142,8 @@ import { evaluateProgression } from './progression.js';
       { name: 'Snack · Greek yogurt', sub: '15:30 · 22 g protein', kcal: 360, protein: 22 },
     ],
     portionIdx: 2,
+    // on-device food-photo (F5): stage = capture | analyzing | result
+    fp: { stage: 'capture', img: null, dish: null, kcalBase: 620, proteinBase: 34, conf: 0, matched: false, raw: [] },
     photoView: 'front', photoCompare: 50,
     body: { weightKg: 74.2, weekChange: -1.2, waist: 82, hip: 96, bf: 16, trend: BODY_TREND.slice() },
     scan: { ...SCAN_SEED },       // imported segmental scan (E6)
@@ -430,34 +433,62 @@ import { evaluateProgression } from './progression.js';
   }
 
   function screenFoodphoto() {
+    const fp = state.fp;
+    const fileInput = `<input type="file" accept="image/*" capture="environment" id="foodfile" style="display:none">`;
+    const top = `<div class="topbar"><button class="sheet-cancel" data-action="nav:food" style="width:auto;color:var(--text-2)">Cancel</button>
+        <span class="grow" style="text-align:center;font-size:16px;font-weight:700">On-device estimate</span>
+        <button class="sheet-cancel" data-action="${fp.stage === 'capture' ? 'nav:food' : 'fp-retake'}" style="width:auto;color:var(--indigo-3)">${fp.stage === 'capture' ? '' : 'Retake'}</button></div>`;
+
+    // --- Stage 1: capture -------------------------------------------------
+    if (fp.stage === 'capture') {
+      return `<div class="route">${top}
+        <div class="view" style="overflow-y:auto"><div style="padding:20px">
+          <button data-action="fp-shoot" class="fp-photo" style="width:100%;border:1.5px dashed var(--line-strong);cursor:pointer;flex-direction:column;gap:12px">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="var(--indigo-3)" stroke-width="1.8">${ICONS.camera}</svg>
+            <span style="font-size:15px;font-weight:700;color:var(--text)">Foto makananmu · Snap your meal</span>
+            <span style="font-size:12px;color:var(--muted-2)">Kamera atau galeri · camera or gallery</span></button>
+          ${HINT('Fotonya diproses <b style="color:var(--text-2)">di HP kamu</b> — tanpa server, tanpa API key, tetap jalan offline. · Runs on your phone, no server.')}
+          <button class="btn btn-ghost" data-action="fp-pick" style="margin-top:10px">Pilih dari daftar · Pick from library</button>
+        </div></div>${fileInput}</div>`;
+    }
+
+    // --- Stage 2/3: analyzing / result -----------------------------------
     const p = PORTIONS[state.portionIdx];
-    const kcal = Math.round(620 * p.mult / 10) * 10;
-    const protein = Math.round(34 * p.mult);
-    const kLo = Math.round(kcal * 0.87 / 10) * 10, kHi = Math.round(kcal * 1.13 / 10) * 10;
-    const pLo = Math.round(protein * 0.9), pHi = Math.round(protein * 1.12);
-    return `<div class="route">
-      <div class="topbar"><button class="sheet-cancel" data-action="nav:food" style="width:auto;color:var(--text-2)">Cancel</button>
-        <span class="grow" style="text-align:center;font-size:16px;font-weight:700">AI estimate</span>
-        <button class="sheet-cancel" data-action="portion:0" style="width:auto;color:var(--indigo-3)">Retake</button></div>
-      <div class="view" style="overflow-y:auto">
-        <div class="fp-photo">
-          <span style="font:12px ui-monospace,Menlo,monospace;color:var(--dim);letter-spacing:1.5px">[ meal photo ]</span>
-          <div style="position:absolute;top:14px;left:16px;display:flex;align-items:center;gap:7px;background:rgba(10,10,11,.7);backdrop-filter:blur(10px);border:1px solid rgba(148,140,255,.4);border-radius:999px;padding:6px 11px">
-            <div class="ai-badge" style="width:18px;height:18px;font-size:8px">AI</div><span style="font-size:12px;font-weight:600;color:#d8d6ff">Detected · 92% confident</span></div>
-        </div>
-        <div style="padding:18px 20px 28px">
-          <div class="section-label" style="margin-bottom:6px">I THINK THIS IS</div>
-          <div style="font-size:22px;font-weight:700;letter-spacing:-.3px">Nasi + ayam goreng + tempe</div>
+    const kcal = Math.round(fp.kcalBase * p.mult / 10) * 10;
+    const protein = Math.round(fp.proteinBase * p.mult);
+    const kLo = Math.round(kcal * 0.85 / 10) * 10, kHi = Math.round(kcal * 1.15 / 10) * 10;
+    const pLo = Math.round(protein * 0.85), pHi = Math.round(protein * 1.15);
+    const analyzing = fp.stage === 'analyzing';
+    const good = fp.matched && fp.conf >= 55;
+    const badge = analyzing
+      ? `<div style="display:flex;align-items:center;gap:7px;background:rgba(10,10,11,.72);backdrop-filter:blur(10px);border:1px solid rgba(148,140,255,.4);border-radius:999px;padding:6px 11px"><div class="ai-badge" style="width:18px;height:18px;font-size:8px">AI</div><span style="font-size:12px;font-weight:600;color:#d8d6ff">Menganalisis… · analyzing</span></div>`
+      : `<div style="display:flex;align-items:center;gap:7px;background:rgba(10,10,11,.72);backdrop-filter:blur(10px);border:1px solid ${good ? 'rgba(48,209,88,.4)' : 'rgba(255,159,10,.4)'};border-radius:999px;padding:6px 11px"><div class="ai-badge" style="width:18px;height:18px;font-size:8px">AI</div><span style="font-size:12px;font-weight:600;color:${good ? '#7ee59b' : '#ffcf7a'}">${good ? `Detected · ${fp.conf}%` : `Not sure${fp.conf ? ` · ${fp.conf}%` : ''}`}</span></div>`;
+
+    const body = analyzing
+      ? `<div style="padding:26px 20px;text-align:center;color:var(--muted)"><div style="font-size:14px;font-weight:600">Menganalisis di HP kamu…</div><div style="font-size:12px;color:var(--muted-2);margin-top:6px">Model dimuat sekali, lalu jalan offline. · First run loads the model, then it's offline.</div></div>`
+      : `<div style="padding:18px 20px 28px">
+          <div class="section-label" style="margin-bottom:6px">${good ? 'I THINK THIS IS' : 'BEST GUESS — CHECK IT'}</div>
+          <div style="font-size:22px;font-weight:700;letter-spacing:-.3px">${esc(fp.dish || 'Mixed meal')}</div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
             <span style="font-size:13px;color:var(--muted)">Portion</span>
             <div class="stepper"><button data-action="portion:-1">−</button><span style="font-size:14px;font-weight:600;min-width:104px;text-align:center">${esc(p.label)}</span><button data-action="portion:1">+</button></div></div>
           <div style="display:flex;gap:12px;margin:18px 0 6px">
             <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Calories</div><div style="font-size:26px;font-weight:800;margin-top:5px">≈ ${kcal}</div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">range ${kLo}–${kHi} kcal</div></div>
             <div style="flex:1;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px"><div style="font-size:12px;color:var(--muted-2);font-weight:600">Protein</div><div style="font-size:26px;font-weight:800;margin-top:5px;color:var(--orange)">≈ ${protein}<span style="font-size:15px;color:var(--muted-2)">g</span></div><div style="font-size:11px;color:var(--muted-2);margin-top:2px">range ${pLo}–${pHi} g</div></div></div>
-          ${HINT('These are <b style="color:var(--text-2)">estimates, not exact</b> — tap ± to correct the portion. I&rsquo;ll remember this meal so it&rsquo;s 1-tap next time.')}
+          ${HINT(good
+            ? 'These are <b style="color:var(--text-2)">estimates, not exact</b> — tap ± to correct the portion.'
+            : 'The model wasn&rsquo;t confident (Indonesian dishes are hard on-device). <b style="color:var(--text-2)">Adjust the portion</b> or pick from your library.')}
           <button class="btn btn-primary" data-action="log-photo" style="margin:8px 0 10px">Looks right — log it</button>
-          <button class="btn btn-ghost" data-action="nav:food">Edit details</button>
+          <button class="btn btn-ghost" data-action="fp-pick">Pick from library instead</button>
+        </div>`;
+
+    return `<div class="route">${top}
+      <div class="view" style="overflow-y:auto">
+        <div class="fp-photo" style="background:#0b0b0d">
+          <img src="${fp.img}" alt="meal" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+          <div style="position:absolute;top:14px;left:16px">${badge}</div>
         </div>
+        ${body}
       </div></div>`;
   }
 
@@ -952,7 +983,26 @@ import { evaluateProgression } from './progression.js';
     renderTabbar();
     if (state.tab === 'photos') wireCompare();
     if (state.tab === 'consult') wireConsult();
+    if (state.tab === 'foodphoto') wireFoodphoto();
   }
+  function wireFoodphoto() {
+    const inp = $('#foodfile'); if (!inp) return;
+    inp.addEventListener('change', async () => {
+      const file = inp.files && inp.files[0]; if (!file) return;
+      let dataUrl, img;
+      try { ({ dataUrl, img } = await Vision.compressImage(file)); }
+      catch (e) { showToast('Gagal baca foto · could not read photo'); return; }
+      state.fp = { ...state.fp, stage: 'analyzing', img: dataUrl };
+      state.portionIdx = 2; render();
+      let est = null;
+      try { est = await Vision.estimate(img); } catch (e) { /* model unavailable */ }
+      state.fp = est
+        ? { stage: 'result', img: dataUrl, dish: est.dish, kcalBase: est.kcal, proteinBase: est.protein, conf: est.confidence, matched: est.matched, raw: est.raw }
+        : { stage: 'result', img: dataUrl, dish: 'Mixed meal · adjust', kcalBase: 620, proteinBase: 34, conf: 0, matched: false, raw: [] };
+      render();
+    });
+  }
+  function resetFp() { state.fp = { stage: 'capture', img: null, dish: null, kcalBase: 620, proteinBase: 34, conf: 0, matched: false, raw: [] }; }
   function wireAuth() {
     const inp = $('#authemail'); if (!inp) return;
     inp.addEventListener('input', () => { state.authEmail = inp.value; });
@@ -1094,12 +1144,12 @@ import { evaluateProgression } from './progression.js';
     render(); showToast(`Added · ${k} (${p.kcal} kcal)`);
   }
   function logPhoto() {
-    const p = PORTIONS[state.portionIdx];
-    const kcal = Math.round(620 * p.mult / 10) * 10, protein = Math.round(34 * p.mult);
-    const meal = { name: 'Nasi + ayam goreng + tempe', sub: `${nowTime()} · ${protein} g protein`, kcal, protein, ai: true };
-    state.meals.push(meal);
-    if (BE.on) BE.api.logFood({ meal: 'AI photo', name: meal.name, kcal, protein }).catch(() => {});
-    state.tab = 'food'; state.portionIdx = 2; render(); showToast(`Logged · ${kcal} kcal (AI estimate)`);
+    const fp = state.fp; const p = PORTIONS[state.portionIdx];
+    const kcal = Math.round((fp.kcalBase || 620) * p.mult / 10) * 10, protein = Math.round((fp.proteinBase || 34) * p.mult);
+    const name = fp.dish || 'Mixed meal';
+    state.meals.push({ name, sub: `${nowTime()} · ${protein} g protein`, kcal, protein, ai: true });
+    if (BE.on) BE.api.logFood({ meal: 'AI photo', name, kcal, protein }).catch(() => {});
+    state.tab = 'food'; state.portionIdx = 2; resetFp(); render(); showToast(`Logged · ${kcal} kcal (estimate)`);
   }
 
   /* ---- Editable sets (6b) + shared keypad ------------------ */
@@ -1203,7 +1253,7 @@ import { evaluateProgression } from './progression.js';
   }
 
   const ACTIONS = {
-    'nav': (a) => { state.tab = a; render(); $('#view').scrollTop = 0; },
+    'nav': (a) => { if (a === 'foodphoto' && state.fp.stage !== 'capture') resetFp(); state.tab = a; render(); $('#view').scrollTop = 0; },
     'log-set': (a) => logSet(Number(a)),
     'next-exercise': () => nextExercise(),
     'b-tap': (a) => { const [row, field] = a.split(':'); bTap(Number(row), field); },
@@ -1233,6 +1283,9 @@ import { evaluateProgression } from './progression.js';
     'finish-report': () => { finishReport(); },
     'add-preset': (a) => addPreset(a),
     'log-photo': () => logPhoto(),
+    'fp-shoot': () => { const el = $('#foodfile'); if (el) el.click(); },
+    'fp-retake': () => { resetFp(); render(); },
+    'fp-pick': () => { resetFp(); state.tab = 'food'; render(); showToast('Pilih makanan dari daftar · pick from your list'); },
     'portion': (a) => { const d = Number(a); state.portionIdx = d === 0 ? 2 : Math.max(0, Math.min(PORTIONS.length - 1, state.portionIdx + d)); render(); },
     'photoview': (a) => { state.photoView = a; render(); },
     'rate': (a) => { const [kind, n] = a.split(':'); state.checkin[kind] = Number(n); render(); },

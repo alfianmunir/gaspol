@@ -167,7 +167,12 @@ export const GaspolData = {
     if (error) throw error;
     return data;
   },
-  /** AI photo estimate (premium). Calls the fit-food-estimate Edge Function. */
+  /**
+   * Optional server-side photo estimate via the fit-food-estimate Edge
+   * Function (Claude vision). The app now estimates ON-DEVICE by default
+   * (see foodvision.js — no API key, private), so this is only used if you
+   * explicitly wire a premium cloud path. Left here for that option.
+   */
   async estimateFoodPhoto(fileOrDataUrl) {
     return invokeFn('fit-food-estimate', { image: await toBase64(fileOrDataUrl) });
   },
