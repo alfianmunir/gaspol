@@ -65,13 +65,33 @@ app.js                state, all 18 screens, and the live interactions
 manifest.webmanifest  PWA metadata
 sw.js                 offline service worker
 icon.svg              app icon
-BACKEND.md            recommended backend framework + data model + wiring plan
+
+progression.js        auto-progression + calorie rules (F3/F8), browser
+data.js               Supabase data layer + offline queue (backend-agnostic API)
+config.example.js     → copy to config.js with your project keys
+supabase/             migration, edge functions, cron schedule, config
+BACKEND.md            why Supabase + data model + wiring plan
+SUPABASE.md           setup / deploy / wire-in guide
 ```
 
 ## Backend
 
-The app currently runs fully client-side on seeded persona data so every screen
-and flow is demoable with no server. See **[BACKEND.md](./BACKEND.md)** for the
-recommended backend (Supabase) and how to wire it in — it matches the existing
-`fit_` Supabase project and the weekly AI coach-review automation described in the
-handoffs, and the PRD's architecture table.
+The app runs fully client-side on seeded persona data, so every screen and flow is
+demoable with no server. The Supabase layer is scaffolded and ready to wire in:
+
+- **`data.js`** — backend-agnostic API mapped 1:1 to the real `fit_*` tables,
+  scoped per user, with an **offline IndexedDB queue** so gym logging works with no
+  signal (PRD F2/§8).
+- **`progression.js`** — the auto-progression + calorie rules (F3/F8), shared with
+  the server function.
+- **`supabase/functions/fit-weekly-review`** — Sunday cron: applies progression +
+  calorie rules and writes the AI coach note (F8).
+- **`supabase/functions/fit-food-estimate`** — premium AI food-photo estimate with
+  honest ranges (F5).
+- **`supabase/migrations/…_fit_multiuser.sql`** — adds `user_id` + per-user RLS +
+  progress-photo storage to the existing single-user prototype (F10/F6).
+
+See **[BACKEND.md](./BACKEND.md)** for the framework rationale and
+**[SUPABASE.md](./SUPABASE.md)** for setup, deploy, and how to front the seed data
+with `data.js` (no screen changes). It matches the existing shared `fit_*` Supabase
+project and its weekly coach-review automation.
