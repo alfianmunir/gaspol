@@ -12,4 +12,8 @@
 window.GASPOL_CONFIG = {
   url: "https://ticdiatbdxkmpzmqvntn.supabase.co",
   anonKey: "YOUR_SUPABASE_ANON_PUBLISHABLE_KEY",
+
+  // Set true after enabling auth + applying the fit_rls_enforce migration.
+  // true → sign-in gate + per-user data scoping. false → open prototype.
+  requireAuth: false,
 };

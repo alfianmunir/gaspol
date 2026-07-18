@@ -61,6 +61,10 @@ export const GaspolData = {
     uid = res.data?.user?.id || null;
     return res;
   },
+  /** Passwordless sign-in: emails a magic link that returns to the app (F10). */
+  async sendMagicLink(email, redirectTo = location.origin) {
+    return sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+  },
   async signOut() { await sb.auth.signOut(); uid = null; },
 
   /* ---------- Program & today's session (F1/F2) ----------- */

@@ -119,6 +119,8 @@ import { evaluateProgression } from './progression.js';
   /* ---------- App state -------------------------------------- */
   const state = {
     tab: 'today',
+    // auth gate (F10) — only engaged when config.requireAuth is true
+    gate: null, authEmail: '', authSent: false, authBusy: false,
     // onboarding wizard (E2): program → experience → frequency → body-comp
     obStep: 0, obGoal: 'cut', obExp: 'intermediate', obFreq: 6,
     // body-composition intake (6a) — seeded with Munir's real tape
@@ -643,6 +645,30 @@ import { evaluateProgression } from './progression.js';
         </div>
       </div></div>`;
   }
+  /* =========================================================
+     Auth gate (F10) — shown only when config.requireAuth is true
+     and there is no signed-in session yet.
+     ========================================================= */
+  function screenAuth() {
+    const busy = state.authBusy, sent = state.authSent, offline = !BE.on;
+    const gLogo = `<svg width="19" height="19" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>`;
+    return `<div class="route" style="display:flex;flex-direction:column;justify-content:center;min-height:100vh;padding:34px 26px">
+      <div style="text-align:center;margin-bottom:36px">
+        <div style="width:64px;height:64px;border-radius:20px;background:linear-gradient(135deg,var(--green),#1f9d57);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:30px;font-weight:900;color:#0c0c0e">G</div>
+        <h1 style="font-size:26px;font-weight:800;margin-bottom:8px">Masuk ke Gaspol</h1>
+        <p style="font-size:14px;color:var(--muted);line-height:1.5">Sign in to sync your training, meals &amp; progress across devices.</p>
+      </div>
+      ${offline ? `<div style="background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:14px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#ffcf7a;line-height:1.4">Server tak terjangkau — cek koneksi lalu coba lagi. · Server unreachable, check your connection.</div>` : ''}
+      <button class="btn btn-primary" data-action="auth-google" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px"${busy ? ' disabled' : ''}>${gLogo} Continue with Google</button>
+      <div style="display:flex;align-items:center;gap:12px;margin:6px 0 14px;color:var(--dim);font-size:12px"><div style="flex:1;height:1px;background:var(--line)"></div>atau · or<div style="flex:1;height:1px;background:var(--line)"></div></div>
+      ${sent
+        ? `<div style="background:rgba(48,209,88,.08);border:1px solid rgba(48,209,88,.25);border-radius:14px;padding:14px;font-size:13px;color:#7ee59b;line-height:1.5">Cek email kamu — magic link terkirim ke <b>${esc(state.authEmail)}</b>. Buka link itu untuk masuk. · Check your inbox for the sign-in link.</div>`
+        : `<div class="qinput-wrap" style="margin-bottom:12px"><input id="authemail" type="email" inputmode="email" autocomplete="email" placeholder="you@email.com · your email" value="${esc(state.authEmail)}"></div>
+           <button class="btn btn-ghost" data-action="auth-magic"${busy ? ' disabled' : ''}>${busy ? 'Mengirim… · Sending…' : 'Email me a magic link'}</button>`}
+      <p style="text-align:center;font-size:11px;color:var(--dim);margin-top:24px;line-height:1.5">Data kamu disimpan aman &amp; tidak pernah dijual. · Stored securely, never sold.</p>
+    </div>`;
+  }
+
   function screenSettings() {
     const pr = state.profile;
     const initial = (pr.name || '?').trim().charAt(0).toUpperCase();
@@ -675,7 +701,7 @@ import { evaluateProgression } from './progression.js';
           <div class="srow" data-action="toast:Photos encrypted · never sold"><div><div class="n">Privacy &amp; storage</div><div class="sub">Photos encrypted · never sold</div></div><span class="val">›</span></div>
         </div>
         <button class="btn btn-ghost" data-action="replay-onboarding" style="margin-bottom:10px">Replay onboarding</button>
-        <button class="btn btn-ghost" data-action="toast:Signed out">Sign out</button>
+        <button class="btn btn-ghost" data-action="signout">Sign out</button>
         <button style="width:100%;background:transparent;color:#ff453a;border:none;font-size:14px;font-weight:600;padding:12px;cursor:pointer;margin-top:6px" data-action="toast:Account deletion — full export first">Delete account</button>
       </div></div>`;
   }
@@ -916,10 +942,21 @@ import { evaluateProgression } from './progression.js';
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS[key]}</svg><span>${label}</span></button>`).join('');
   }
   function render() {
+    if (state.gate === 'auth') {
+      $('#view').innerHTML = screenAuth();
+      $('#tabbar').style.display = 'none';
+      wireAuth();
+      return;
+    }
     $('#view').innerHTML = currentScreen();
     renderTabbar();
     if (state.tab === 'photos') wireCompare();
     if (state.tab === 'consult') wireConsult();
+  }
+  function wireAuth() {
+    const inp = $('#authemail'); if (!inp) return;
+    inp.addEventListener('input', () => { state.authEmail = inp.value; });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ACTIONS['auth-magic'](); } });
   }
   function wireConsult() {
     const chat = $('#chatscroll'); if (chat) chat.scrollTop = chat.scrollHeight;
@@ -1222,6 +1259,25 @@ import { evaluateProgression } from './progression.js';
     'replay-onboarding': () => { state.obStep = 0; state.iGen = false; state.tab = 'onboarding'; render(); $('#view').scrollTop = 0; },
     'nav-measure': () => { state.iReturn = 'body'; state.iGen = false; state.tab = 'measure'; render(); $('#view').scrollTop = 0; },
     'nav-consult': () => { state.tab = 'consult'; render(); },
+    /* ---- Auth gate (F10) ---- */
+    'auth-google': () => {
+      if (!BE.on) { showToast('Server tak terjangkau · server unreachable'); return; }
+      state.authBusy = true; render();
+      BE.api.signInWithGoogle().catch(() => { state.authBusy = false; showToast('Sign-in gagal · failed'); render(); });
+    },
+    'auth-magic': () => {
+      const email = (state.authEmail || '').trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { showToast('Masukkan email yang valid · enter a valid email'); return; }
+      if (!BE.on) { showToast('Server tak terjangkau · server unreachable'); return; }
+      state.authBusy = true; render();
+      BE.api.sendMagicLink(email)
+        .then(({ error }) => { state.authBusy = false; if (error) { showToast('Gagal kirim link · ' + error.message); } else { state.authSent = true; } render(); })
+        .catch(() => { state.authBusy = false; showToast('Gagal kirim link · try again'); render(); });
+    },
+    'signout': () => {
+      if (BE.on && BE.api.userId) { BE.api.signOut().catch(() => {}).then(() => location.reload()); }
+      else showToast('Signed out');
+    },
   };
   function finishOnboarding() { try { localStorage.setItem('gaspol_onboarded', '1'); } catch (e) { /* ignore */ } state.obStep = 0; }
 
@@ -1356,15 +1412,23 @@ import { evaluateProgression } from './progression.js';
   async function boot() {
     try { if (!localStorage.getItem('gaspol_onboarded')) state.tab = 'onboarding'; } catch (e) { /* ignore */ }
     if (typeof window !== 'undefined' && window.GASPOL_CONFIG) {
+      const requireAuth = !!window.GASPOL_CONFIG.requireAuth;
       try {
         const mod = await import('./data.js');
         await mod.GaspolData.init();
         BE.api = mod.GaspolData; BE.on = true;
-        // Hydrate every read-driven tab; each is best-effort so one failure
-        // (or an empty table) leaves that tab on its seed values.
-        await settle(hydrateSession());
-        await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateScan()), settle(hydrateCheckin()), settle(hydrateCheckinHistory()), settle(hydrateConsult()), settle(hydrateReminders()), settle(hydrateReview()), settle(hydrateProfile())]);
       } catch (e) { console.warn('[Gaspol] backend unavailable — running on seed data.', e); BE.on = false; }
+      // With requireAuth on, don't reveal data until there is a real session.
+      // Fail-closed: no session (or backend down) → show the sign-in gate.
+      if (requireAuth && !(BE.on && BE.api.userId)) { state.gate = 'auth'; render(); return; }
+      if (BE.on) {
+        try {
+          // Hydrate every read-driven tab; each is best-effort so one failure
+          // (or an empty table) leaves that tab on its seed values.
+          await settle(hydrateSession());
+          await Promise.all([settle(hydrateFood()), settle(hydrateBody()), settle(hydrateScan()), settle(hydrateCheckin()), settle(hydrateCheckinHistory()), settle(hydrateConsult()), settle(hydrateReminders()), settle(hydrateReview()), settle(hydrateProfile())]);
+        } catch (e) { console.warn('[Gaspol] hydrate error:', e); }
+      }
     }
     render();
     if ('serviceWorker' in navigator) {

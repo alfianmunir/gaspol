@@ -49,11 +49,25 @@ a new `fit-photos` bucket, and `fit-*` functions.
    hydrateCheckinHistory / hydrateConsult / hydrateReminders / hydrateReview /
    hydrateProfile`.
 
-4. **Enforce per-user RLS — LATER, after auth.** `migrations/20260716120100_fit_rls_enforce.sql`
-   is **not applied**. It replaces the open policies with per-user ones and is
-   **destructive to the single-user prototype** until you add auth (email/Google)
-   and backfill `user_id` on existing rows (statements in that file's header). Run
-   it only then.
+4. **Turn on auth + per-user RLS — when you're ready.** The sign-in gate and the
+   enforce migration are both built and waiting behind one flag. Runbook:
+
+   1. **Supabase → Authentication → Providers:** enable **Email** (magic link) and/or
+      **Google** (paste OAuth client id/secret; add your Vercel URL to redirect URLs).
+   2. **Add redirect URLs** (Authentication → URL Configuration): your Vercel origin
+      (e.g. `https://gaspol.vercel.app`) and `http://localhost:*` for local testing.
+   3. **`config.js` → `requireAuth: true`**, redeploy. The app now shows the sign-in
+      gate; sign in once with your account (this creates your `auth.users` row).
+   4. **Apply** `migrations/20260716120100_fit_rls_enforce.sql` (self-contained:
+      auto-detects your uid, backfills every pre-auth `fit_*` row to you — `fit_foods`
+      NULLs stay the shared library — then swaps the open policies for per-user owner
+      policies scoped to `authenticated`). Idempotent; safe to re-run.
+   5. Reload — your data is now private to your account.
+
+   Order matters: do **3 before 4**, or step 4 aborts with "No auth user found"
+   (the FK on `fit_*.user_id → auth.users` means the backfill needs a real uid).
+   The `fit-weekly-review` Edge Function writes with the service-role key, which
+   bypasses RLS, so the Sunday review keeps working after enforcement.
 
 ## Frontend write paths (already wired)
 
@@ -67,6 +81,8 @@ a new `fit-photos` bucket, and `fit-*` functions.
 | save check-in | `saveCheckin({sleepHours,energy,soreness})` |
 | toggle a reminder | `setReminder(key, on)` |
 | open Progress | `getWeeklyReview()` |
+| sign in (gate) | `signInWithGoogle()` / `sendMagicLink(email)` |
+| sign out (Settings) | `signOut()` |
 | open Body → scan card | `getScan()` (latest `fit_body_metrics` row with a `scan` payload) |
 | Today/Check-in recovery signal | `getCheckinHistory(7)` (last 7 `fit_checkins`, oldest→newest) |
 | open Consult | `getConsultLog()` (thread from `fit_settings.consult_log`) |
